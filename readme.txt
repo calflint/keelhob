@@ -4,7 +4,7 @@ Tags: mcp, ai, claude, woocommerce, seo, automation
 Requires at least: 6.3
 Tested up to: 6.9
 Requires PHP: 8.0
-Stable tag: 1.7.0
+Stable tag: 1.7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -102,6 +102,10 @@ Claudpress > Automation. Pick your provider there — the model guide next to th
 field lists the exact model IDs to type for each one.
 
 == Changelog ==
+
+= 1.7.1 — Filesystem-tool safety hotfix =
+* write_file, edit_file and write_sandbox_file now refuse to write broken PHP to disk instead of saving it. A missing/mangled opening `<?php` tag, an unbalanced brace, a stray token or an unterminated string are all caught and rejected before they touch a file — with the specific reason why. Previously nothing checked a .php write for a live plugin file (only the sandbox had crash recovery), so a bad write there fatal-errored the whole site on the next request with no way back except direct server access.
+* Tests: 583 assertions, up from 573.
 
 = 1.7.0 — Voice, photos, approvals, undo and roles =
 * Voice notes: send the bot a voice message and it transcribes it, shows you the transcript, then acts on it. Transcription is its own provider choice (OpenAI Whisper / gpt-4o-transcribe, or Gemini audio) because Anthropic has no speech-to-text API; a blank key reuses any key you already entered for the same vendor.
