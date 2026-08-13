@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev, 'feature/**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 8.0 is the plugin's declared floor; the rest are what real hosts run.
+        php: ['8.0', '8.1', '8.2', '8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: none
+
+      - name: Syntax-check every PHP file
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r file; do
+            if ! php -l "$file" > /dev/null 2>&1; then
+              echo "::error file=$file::PHP syntax error"
+              php -l "$file" || true
+              fail=1
+            fi
+          done < <(find . -name '*.php' -not -path './.git/*')
+          exit $fail
+
+  test:
+    name: Unit tests (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.0', '8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: none
+
+      - name: Run the test suite
+        run: php tests/run.php
+
+  package:
+    name: Build the installable zip
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: bash bin/build-zip.sh
+
+      - name: Verify the zip layout
+        run: |
+          set -euo pipefail
+          # The archive must contain a single top-level claudpress/ directory,
+          # or WordPress installs it to the wrong path.
+          roots=$(unzip -Z1 build/claudpress.zip | cut -d/ -f1 | sort -u)
+          if [ "$roots" != "claudpress" ]; then
+            echo "::error::zip must contain exactly one top-level dir 'claudpress', got: $roots"
+            exit 1
+          fi
+          # Nothing that shouldn't ship.
+          if unzip -Z1 build/claudpress.zip | grep -Eq '(^|/)(\.git|\.github|tests|\.codegraph|node_modules)/'; then
+            echo "::error::development files leaked into the zip"
+            unzip -Z1 build/claudpress.zip | grep -E '(^|/)(\.git|\.github|tests|\.codegraph|node_modules)/'
+            exit 1
+          fi
+          unzip -Z1 build/claudpress.zip | grep -q '^claudpress/claudpress.php$'
+          echo "zip OK — $(unzip -Z1 build/claudpress.zip | wc -l) entries, $(du -h build/claudpress.zip | cut -f1)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claudpress-plugin
+          path: build/claudpress.zip
+          if-no-files-found: error
+
+  smoke:
+    name: Live MCP smoke test
+    runs-on: ubuntu-latest
+    # Only runs where a target site is configured, so forks and PRs skip it.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Smoke-test the configured site
+        env:
+          CLAUDPRESS_URL: ${{ secrets.CLAUDPRESS_URL }}
+          CLAUDPRESS_TOKEN: ${{ secrets.CLAUDPRESS_TOKEN }}
+        run: |
+          if [ -z "${CLAUDPRESS_URL:-}" ]; then
+            echo "No CLAUDPRESS_URL secret set — skipping."
+            exit 0
+          fi
+          node tests/live-smoke.mjs

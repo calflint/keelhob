@@ -1,5 +1,6 @@
-# Build artifact (regenerated from source)
+# Build artifacts (regenerated from source by bin/build-zip.sh)
 claudpress.zip
+build/
 
 # Code index (local only)
 .codegraph/

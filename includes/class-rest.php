@@ -45,6 +45,74 @@ final class Claudpress_Rest
             'callback'            => [$this, 'handle_import'],
             'permission_callback' => [$this, 'permission'],
         ]);
+
+        // Telegram webhook: the bot's messages arrive here.
+        //
+        // The permission callback has to return true — Telegram cannot send a
+        // bearer token, and a rejected request would just be retried forever.
+        // Authentication is the secret header instead, checked first thing in
+        // the handler, so an unsigned request never reaches the agent.
+        register_rest_route(CLAUDPRESS_REST_NAMESPACE, '/telegram', [
+            'methods'             => 'POST',
+            'callback'            => [$this, 'handle_telegram'],
+            'permission_callback' => '__return_true',
+        ]);
+    }
+
+    /**
+     * Whether a delivery really came from Telegram.
+     *
+     * Constant-time compare: a plain === leaks how much of the secret matched
+     * through response timing, and this endpoint is public by necessity.
+     */
+    public static function telegram_signed(?string $header, string $secret): bool
+    {
+        return $secret !== '' && is_string($header) && hash_equals($secret, $header);
+    }
+
+    public function handle_telegram(WP_REST_Request $request): WP_REST_Response
+    {
+        if (!Claudpress_Telegram::enabled()) {
+            return new WP_REST_Response(['ok' => false, 'error' => 'Telegram chat is disabled.'], 404);
+        }
+
+        $header = $request->get_header('x_telegram_bot_api_secret_token');
+        if (!self::telegram_signed(is_string($header) ? $header : null, Claudpress_Telegram::secret())) {
+            return new WP_REST_Response(['ok' => false, 'error' => 'Bad secret token.'], 403);
+        }
+
+        $update = json_decode($request->get_body(), true);
+        if (!is_array($update)) {
+            return new WP_REST_Response(['ok' => false, 'error' => 'Malformed update.'], 400);
+        }
+
+        // Ack Telegram before doing the slow part. An agent run takes far longer
+        // than Telegram will wait, and an unacked delivery gets retried — which
+        // without this would mean the same instruction running several times.
+        // The update_id high-water mark in handle_update covers the servers
+        // where this is unavailable.
+        if (function_exists('fastcgi_finish_request')) {
+            $done = new WP_REST_Response(['ok' => true], 200);
+            $this->flush_response($done);
+            Claudpress_Telegram::handle_update($update);
+            exit;
+        }
+
+        $result = Claudpress_Telegram::handle_update($update);
+        return new WP_REST_Response($result, 200);
+    }
+
+    /** Emit a REST response early so the connection can close. */
+    private function flush_response(WP_REST_Response $response): void
+    {
+        if (!headers_sent()) {
+            status_header($response->get_status());
+            header('Content-Type: application/json');
+        }
+        echo wp_json_encode($response->get_data());
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        }
     }
 
     public function handle_import(WP_REST_Request $request): WP_REST_Response
@@ -67,15 +135,30 @@ final class Claudpress_Rest
         return Claudpress_Auth::authenticate();
     }
 
-    public function status(): WP_REST_Response
+    /**
+     * Health check for connection debugging.
+     *
+     * This route is deliberately unauthenticated so a client can confirm the
+     * endpoint exists before it has credentials — but that also means anyone on
+     * the internet can read it. So it only advertises that Claudpress is
+     * installed and where to connect. Whether abilities are switched on, and how
+     * many tools are exposed, tells an attacker whether this site is worth
+     * attacking; that detail is only returned to an authenticated caller.
+     */
+    public function status(WP_REST_Request $request): WP_REST_Response
     {
-        return new WP_REST_Response([
-            'name'              => 'Claudpress',
-            'version'           => CLAUDPRESS_VERSION,
-            'abilities_enabled' => Claudpress::instance()->abilities_enabled(),
-            'endpoint'          => rest_url(CLAUDPRESS_REST_NAMESPACE . '/mcp'),
-            'tool_count'        => count(Claudpress::instance()->registry->names()),
-        ], 200);
+        $body = [
+            'name'     => 'Claudpress',
+            'version'  => CLAUDPRESS_VERSION,
+            'endpoint' => rest_url(CLAUDPRESS_REST_NAMESPACE . '/mcp'),
+        ];
+
+        if (Claudpress_Auth::authenticate() === true) {
+            $body['abilities_enabled'] = Claudpress::instance()->abilities_enabled();
+            $body['tool_count']        = count(Claudpress::instance()->registry->names());
+        }
+
+        return new WP_REST_Response($body, 200);
     }
 
     public function handle_get(): WP_REST_Response

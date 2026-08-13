@@ -277,6 +277,11 @@ final class Claudpress_Snippets
     {
         global $wpdb;
         $wpdb->update(self::table(), ['active' => 0, 'last_error' => mb_substr($message, 0, 1000)], ['id' => $id]);
+
+        // Something the agent wrote is now switched off. The site is up because
+        // of it, but only the owner can decide whether the missing behaviour
+        // matters — so this is announced, not just logged.
+        do_action('claudpress_snippet_auto_deactivated', $id, $message);
     }
 
     // ---- conditions -------------------------------------------------------

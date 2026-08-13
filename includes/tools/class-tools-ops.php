@@ -196,33 +196,43 @@ final class Claudpress_Tools_Ops
         $settings = Claudpress::instance()->settings();
         $key      = (string) ($settings['image_api_key'] ?? '');
         if ($key === '') {
-            return ['success' => false, 'error' => 'No image generation key configured. Add one in WP Admin > Claudpress > Settings (image_api_key), or use image_search (Openverse) for free stock images instead.'];
+            return ['success' => false, 'error' => 'No image generation key configured. Add one in WP Admin > Claudpress > Automation, or use image_search (Openverse) for free stock images instead.'];
         }
-        $endpoint = (string) ($settings['image_api_endpoint'] ?? 'https://api.openai.com/v1/images/generations');
-        $model    = (string) ($settings['image_api_model'] ?? 'gpt-image-1');
 
-        $resp = wp_remote_post($endpoint, [
+        /** @var class-string<Claudpress_Image_Provider> $provider */
+        $provider = Claudpress_Image_Provider::current();
+        $endpoint = trim((string) ($settings['image_api_endpoint'] ?? '')) ?: $provider::default_endpoint();
+        $model    = trim((string) ($settings['image_api_model'] ?? '')) ?: $provider::default_model();
+
+        $resp = wp_remote_post($provider::url($endpoint, $model), [
             'timeout' => 120,
-            'headers' => ['Authorization' => 'Bearer ' . $key, 'Content-Type' => 'application/json'],
-            'body'    => wp_json_encode(['model' => $model, 'prompt' => (string) $a['prompt'], 'size' => $a['size'] ?? '1024x1024', 'n' => 1]),
+            'headers' => $provider::headers($key),
+            'body'    => wp_json_encode($provider::body($model, (string) $a['prompt'], (string) ($a['size'] ?? '1024x1024'))),
         ]);
         if (is_wp_error($resp)) {
             return ['success' => false, 'error' => $resp->get_error_message()];
         }
         $body = json_decode(wp_remote_retrieve_body($resp), true);
-        if (empty($body['data'][0])) {
-            return ['success' => false, 'error' => 'Image API returned no data: ' . wp_remote_retrieve_body($resp)];
+        if (!is_array($body)) {
+            return ['success' => false, 'error' => 'Malformed image API response.'];
         }
-        $item     = $body['data'][0];
+        $code = (int) wp_remote_retrieve_response_code($resp);
+        if ($code < 200 || $code >= 300) {
+            $msg = (string) ($body['error']['message'] ?? wp_remote_retrieve_body($resp));
+            return ['success' => false, 'error' => 'Image API error HTTP ' . $code . ': ' . mb_substr($msg, 0, 400)];
+        }
+
         $filename = sanitize_file_name(($a['filename'] ?? 'generated-' . time()) . '.png');
 
-        $bytes = null;
-        if (!empty($item['b64_json'])) {
-            $bytes = base64_decode($item['b64_json']);
-        } elseif (!empty($item['url'])) {
-            $dl = wp_remote_get($item['url'], ['timeout' => 60]);
-            if (!is_wp_error($dl)) {
-                $bytes = wp_remote_retrieve_body($dl);
+        // Vendors either inline the bytes or hand back a short-lived URL.
+        $bytes = $provider::extract_bytes($body);
+        if ($bytes === null) {
+            $url = $provider::extract_url($body);
+            if ($url !== null) {
+                $dl = wp_remote_get($url, ['timeout' => 60]);
+                if (!is_wp_error($dl)) {
+                    $bytes = wp_remote_retrieve_body($dl);
+                }
             }
         }
         if (!$bytes) {

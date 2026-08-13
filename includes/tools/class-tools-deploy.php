@@ -15,9 +15,9 @@ final class Claudpress_Tools_Deploy
 {
     public static function register(Claudpress_Tool_Registry $r): void
     {
-        $types = ['pages', 'posts', 'products', 'snippets', 'skills', 'memory', 'options'];
+        $types = Claudpress_Migration::TYPES;
 
-        $r->add('export_bundle', 'Export a portable JSON bundle of this site\'s content and config (pages, posts, products, snippets, skills, memory, selected options — incl. Elementor & SEO meta). Secrets (API keys/tokens) are never included. Use as the first half of a staging→production migration. Returns the bundle.', [
+        $r->add('export_bundle', 'Export a portable JSON bundle of this site\'s content and config: pages, posts, products (simple products in full; a variable product\'s content only — its attributes and variations are not portable), snippets, skills, memory, nav menus with their theme locations, widgets/sidebars, and selected options — incl. Elementor & SEO meta. Secrets (API keys/tokens) are never included. Use as the first half of a staging→production migration. Returns the bundle.', [
             'type' => 'object',
             'properties' => [
                 'types'  => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => $types], 'description' => 'Which entity types to include. Default: all.'],
@@ -26,7 +26,7 @@ final class Claudpress_Tools_Deploy
             ],
         ], [self::class, 'export_bundle'], ['readOnlyHint' => true]);
 
-        $r->add('import_bundle', 'Import a bundle produced by export_bundle into THIS site. Idempotent: matches by slug/SKU/name/key and updates rather than duplicating. Sideloads featured images. Use as the second half of a migration (run it on the destination site).', [
+        $r->add('import_bundle', 'Import a bundle produced by export_bundle into THIS site. Idempotent: matches by slug/SKU/name/key and updates rather than duplicating. Relinks menu items to this site\'s pages by slug, and restores widgets into sidebars this theme registers. Sideloads featured images. Variable products are reported in "skipped" — import the content, then rebuild their attributes and variations here with wc_product / execute_php. Use as the second half of a migration (run it on the destination site).', [
             'type' => 'object',
             'properties' => [
                 'bundle' => ['type' => 'object', 'description' => 'The bundle object from export_bundle.'],
@@ -53,7 +53,11 @@ final class Claudpress_Tools_Deploy
         ]);
         $counts = [];
         foreach ($bundle['entities'] as $type => $items) {
-            $counts[$type] = is_array($items) ? count($items) : 0;
+            // Widgets are a map (sidebars + instances), not a list — count the
+            // sidebars so the number means something to the caller.
+            $counts[$type] = $type === 'widgets'
+                ? count((array) ($items['sidebars_widgets'] ?? []))
+                : (is_array($items) ? count($items) : 0);
         }
         return ['success' => true, 'counts' => $counts, 'bundle' => $bundle];
     }

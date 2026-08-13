@@ -22,7 +22,11 @@ final class Claudpress_Tasks
         'twicedaily' => 43200,
         'daily'      => 86400,
         'weekly'     => 604800,
+        'monthly'    => 2592000,
     ];
+
+    /** Schedules for which a preferred hour-of-day is meaningful. */
+    const HOUR_AWARE = ['daily', 'weekly', 'monthly'];
 
     public static function table(): string
     {
@@ -42,6 +46,7 @@ final class Claudpress_Tasks
             instruction LONGTEXT NULL,
             mode VARCHAR(20) NOT NULL DEFAULT 'digest',
             schedule VARCHAR(20) NOT NULL DEFAULT 'daily',
+            run_hour TINYINT NULL,
             allow_risky TINYINT(1) NOT NULL DEFAULT 0,
             enabled TINYINT(1) NOT NULL DEFAULT 1,
             last_run DATETIME NULL,
@@ -72,20 +77,70 @@ final class Claudpress_Tasks
         }
     }
 
+    /**
+     * Whether a task should fire right now. Pure so the scheduling rules can be
+     * tested without a database or a clock.
+     *
+     * Two gates: enough time must have elapsed since the last run, and — for
+     * daily/weekly/monthly tasks with a preferred hour — the local hour must
+     * match. The hourly cron tick means "at 07:00" really means "the first tick
+     * on or after 07:00", so a task that has already waited a full extra day
+     * fires regardless, rather than being starved by a missed tick.
+     *
+     * @param array $task ['enabled','schedule','run_hour','last_run_ts']
+     * @param int   $now      unix timestamp
+     * @param int   $now_hour local hour 0-23
+     */
+    public static function is_due(array $task, int $now, int $now_hour): bool
+    {
+        if ((int) ($task['enabled'] ?? 1) !== 1) {
+            return false;
+        }
+        $interval = self::INTERVALS[$task['schedule'] ?? 'daily'] ?? 86400;
+        $last     = (int) ($task['last_run_ts'] ?? 0);
+        $elapsed  = $now - $last;
+
+        if ($elapsed < ($interval - 120)) {
+            return false; // not due yet (2-min tolerance for cron drift)
+        }
+
+        $hour = $task['run_hour'] ?? null;
+        if ($hour === null || $hour === '' || !in_array($task['schedule'] ?? 'daily', self::HOUR_AWARE, true)) {
+            return true;
+        }
+        if ((int) $hour === $now_hour) {
+            return true;
+        }
+        // Overdue by a whole extra period (a missed tick) — don't starve it.
+        return $elapsed >= ($interval + 86400);
+    }
+
     /** WP-Cron callback: run every enabled task whose interval has elapsed. */
     public static function run_due(): void
     {
+        $now      = time();
+        $now_hour = (int) current_time('G');
+
         foreach (self::all() as $task) {
-            if ((int) $task['enabled'] !== 1) {
-                continue;
+            $due = self::is_due([
+                'enabled'     => (int) $task['enabled'],
+                'schedule'    => $task['schedule'],
+                'run_hour'    => $task['run_hour'] ?? null,
+                'last_run_ts' => $task['last_run'] ? strtotime($task['last_run']) : 0,
+            ], $now, $now_hour);
+
+            if ($due) {
+                self::run_task((int) $task['id']);
             }
-            $interval = self::INTERVALS[$task['schedule']] ?? 86400;
-            $last     = $task['last_run'] ? strtotime($task['last_run']) : 0;
-            if ((time() - $last) < ($interval - 120)) {
-                continue; // not due yet (2-min tolerance)
-            }
-            self::run_task((int) $task['id']);
         }
+
+        // Update alerts are checked on the tick rather than on page loads, so a
+        // visitor never pays for a plugin-update lookup.
+        Claudpress_Events::cron_check();
+
+        // Housekeeping: keep the agent run log and chat transcripts bounded.
+        Claudpress_Agent_Runs::prune(90);
+        Claudpress_Telegram::prune(30);
     }
 
     // ---- execution --------------------------------------------------------
@@ -101,6 +156,8 @@ final class Claudpress_Tasks
         if ($task['mode'] === 'autonomous') {
             $res = Claudpress_Agent_Runtime::run((string) $task['instruction'], [
                 'allow_risky' => (bool) $task['allow_risky'],
+                'context'     => 'task',
+                'task_id'     => (int) $task['id'],
             ]);
             $ok      = !empty($res['success']);
             $summary = $ok ? (string) ($res['summary'] ?? '') : ('ERROR: ' . ($res['error'] ?? 'unknown'));
@@ -144,11 +201,17 @@ final class Claudpress_Tasks
             return ['success' => false, 'error' => 'Autonomous tasks need an instruction.'];
         }
 
+        $run_hour = null;
+        if (isset($a['run_hour']) && $a['run_hour'] !== '' && $a['run_hour'] !== null) {
+            $run_hour = max(0, min(23, (int) $a['run_hour']));
+        }
+
         $row = [
             'name'        => sanitize_text_field((string) ($a['name'] ?? 'Task')),
             'instruction' => (string) ($a['instruction'] ?? ''),
             'mode'        => $mode,
             'schedule'    => $schedule,
+            'run_hour'    => $run_hour,
             'allow_risky' => (int) (bool) ($a['allow_risky'] ?? false),
             'enabled'     => array_key_exists('enabled', $a) ? (int) (bool) $a['enabled'] : 1,
             'notify'      => array_key_exists('notify', $a) ? (int) (bool) $a['notify'] : 1,

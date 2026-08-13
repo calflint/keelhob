@@ -3,10 +3,11 @@
  * Plugin Name:       Claudpress
  * Plugin URI:        https://github.com/calflint/claudpress
  * Description:        Self-contained MCP server that gives an AI agent (Claude Code, Claude Desktop, Cursor, Codex…) full, programmatic control of WordPress & WooCommerce — PHP execution, filesystem, content, store, SEO, a code-snippets engine, Elementor building, updates/email, AI/stock images, cross-session memory and a skills engine. No external dependencies. For development & staging sites.
- * Version:           1.3.3
+ * Version:           1.7.0
  * Requires at least: 6.3
  * Requires PHP:      8.0
- * Author:            Built with Claude Code
+ * Author:            Caleb Arthur-Flints
+ * Author URI:        https://github.com/calflint
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       claudpress
@@ -21,7 +22,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('CLAUDPRESS_VERSION', '1.3.3');
+define('CLAUDPRESS_VERSION', '1.7.0');
 define('CLAUDPRESS_FILE', __FILE__);
 define('CLAUDPRESS_DIR', plugin_dir_path(__FILE__));
 define('CLAUDPRESS_URL', plugin_dir_url(__FILE__));
@@ -55,6 +56,11 @@ require_once CLAUDPRESS_DIR . 'includes/class-logger.php';
 require_once CLAUDPRESS_DIR . 'includes/class-policy.php';
 require_once CLAUDPRESS_DIR . 'includes/class-digest.php';
 require_once CLAUDPRESS_DIR . 'includes/class-notifier.php';
+require_once CLAUDPRESS_DIR . 'includes/class-telegram.php';
+require_once CLAUDPRESS_DIR . 'includes/class-events.php';
+require_once CLAUDPRESS_DIR . 'includes/class-undo.php';
+require_once CLAUDPRESS_DIR . 'includes/class-agent-runs.php';
+require_once CLAUDPRESS_DIR . 'includes/class-providers.php';
 require_once CLAUDPRESS_DIR . 'includes/class-agent-runtime.php';
 require_once CLAUDPRESS_DIR . 'includes/class-tasks.php';
 require_once CLAUDPRESS_DIR . 'includes/class-migration.php';
@@ -79,6 +85,7 @@ require_once CLAUDPRESS_DIR . 'includes/tools/class-tools-deploy.php';
  * Boot the plugin once all plugins are loaded (so WooCommerce detection works).
  */
 add_action('plugins_loaded', static function () {
+    load_plugin_textdomain('claudpress', false, dirname(CLAUDPRESS_BASENAME) . '/languages');
     Claudpress::instance()->boot();
 }, 20);
 
