@@ -873,7 +873,7 @@ final class Claudpress_Transcribe_Provider_Google extends Claudpress_Transcribe_
     public static function id(): string { return 'google'; }
     public static function label(): string { return 'Google (Gemini audio)'; }
     public static function default_endpoint(): string { return 'https://generativelanguage.googleapis.com/v1beta/models'; }
-    public static function default_model(): string { return 'gemini-3-flash'; }
+    public static function default_model(): string { return 'gemini-flash-latest'; }
     public static function key_url(): string { return 'https://aistudio.google.com/apikey'; }
 
     public static function transcribe(string $key, string $model, string $endpoint, string $bytes, string $mime, string $filename): array
