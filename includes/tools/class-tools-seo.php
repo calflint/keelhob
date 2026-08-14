@@ -344,12 +344,12 @@ final class Claudpress_Tools_SEO
                     'dateModified' => $post ? mysql2date('c', $post->post_modified_gmt, false) : '',
                 ];
                 if ($author) {
-                    $node['author'] = [
+                    $node['author'] = array_filter([
                         '@type' => 'Person',
                         'name' => $author->display_name,
                         'description' => $author->description ?: null,
                         'url' => get_author_posts_url($author->ID) ?: null,
-                    ];
+                    ], fn($v) => $v !== null && $v !== '');
                 }
                 if (!empty($data['image'])) {
                     $node['image'] = $data['image'];
