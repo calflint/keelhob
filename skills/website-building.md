@@ -1,6 +1,6 @@
 ---
 name: website-building
-description: Build a beautiful website, landing page, homepage, header, or footer in WordPress from a brief, screenshot, or design. Use when the user wants to build/redesign a page or whole site, clone a design pixel-for-pixel, or set up theme, navigation, and footer.
+description: Build a beautiful website, landing page, homepage, header, or footer in WordPress from a brief, screenshot, or design. Use when the user wants to build/redesign a page or whole site, clone a design pixel-for-pixel, or set up theme, navigation, and footer. For a brand-new site with no brief yet, load `site-build-kickoff` first — it runs the stack menu + intake questions this skill assumes are already answered.
 enable_agentic: true
 enable_prompt: true
 ---
@@ -23,8 +23,8 @@ Best when the client needs to edit later. Lower design ceiling, fully editable.
 - Elementor: follow the `elementor-page-building` skill (run `elementor_settings action=prepare_for_ai` first).
 
 ## Site chrome (theme, nav, footer)
-- A lightweight theme like **Hello Elementor** lets the builder control everything: `manage_theme action=install theme=hello-elementor` then `action=activate`.
-- Build the nav bar and footer once (Elementor + Xpro Theme Builder for free custom header/footer, or a `page_template`/theme snippet), then reuse across pages.
+- Pick a stack (usually already chosen by `site-build-kickoff`): **Xpro + Elementor** (lightweight, Xpro Theme Builder for header/footer) or **Solace + Elementor** (see `solace-header-footer` skill — has real traps, read it first) or Elementor Pro Theme Builder if active. Install with `manage_theme action=install theme=<slug>` then `action=activate`.
+- Build the nav bar and footer once with the chosen stack's builder, then reuse across pages.
 - Apply the brand kit (colors, fonts, spacing) site-wide so every page is cohesive — store it in memory and in the Elementor kit.
 
 ## Images (critical — do not skip)

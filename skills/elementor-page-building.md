@@ -12,7 +12,7 @@ Build **client-editable** pages with Elementor via the `elementor_page`, `elemen
 ## One-time prep (do this first)
 1. Confirm Elementor is active (`get_site_info`). If not: `manage_plugin action=install plugin=elementor` then `action=activate plugin=elementor/elementor.php`.
 2. `elementor_settings action=prepare_for_ai` — this enables **Container (flexbox)** and disables the **Atomic editor**. This is essential: build with flexbox Containers, never the deprecated Section/Column widgets, and the Atomic/v4 editor confuses programmatic builds.
-3. For custom headers/footers on Elementor **free**, use **Xpro Theme Builder** (already available on this site). Elementor Pro's Theme Builder also works if `elementor_settings` reports `pro_active: true`.
+3. For custom headers/footers on Elementor **free**, use **Xpro Theme Builder** (already available on this site), or if the active theme is **Solace**, use the `solace-header-footer` skill instead — it has its own Site Builder with real traps. Elementor Pro's Theme Builder also works if `elementor_settings` reports `pro_active: true`.
 
 ## The data model
 Elementor stores a page as `_elementor_data`: a JSON tree of elements. Each element is:

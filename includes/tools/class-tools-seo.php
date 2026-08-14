@@ -3,7 +3,9 @@
  * SEO tools. Reads/writes post SEO across the major SEO plugins (Yoast, Rank
  * Math, All in One SEO, SEOPress) by writing the meta keys each one uses, and
  * falls back to Claudpress's own meta + <head> injection when none is present.
- * Also: on-page analysis, JSON-LD schema, redirects, robots.txt, and sitemap.
+ * Also: on-page analysis (classical + GEO/AI-search signals), JSON-LD schema
+ * (incl. quick generators + @graph), redirects, robots.txt, sitemap, llms.txt,
+ * and per-AI-crawler access control.
  */
 
 if (!defined('ABSPATH')) {
@@ -32,7 +34,7 @@ final class Claudpress_Tools_SEO
             'required' => ['action', 'post_id'],
         ], [self::class, 'seo_meta'], ['destructiveHint' => true]);
 
-        $r->add('seo_analyze', 'Analyze a post for a target keyword and return an actionable on-page SEO report: title/meta length checks, keyword presence in title/URL/first paragraph/headings, keyword density, word count, heading structure, internal/external link counts, and image alt coverage. Read-only.', [
+        $r->add('seo_analyze', 'Analyze a post for a target keyword and return an actionable SEO + GEO (AI-answer-engine) report: classical on-page checks (title/meta length, keyword presence/density, word count, headings, internal/external links, image alt coverage) plus GEO checks that matter for being cited by ChatGPT/Perplexity/Google AI Overviews/Claude (answer-first opening paragraph, FAQ/list/table structuring, JSON-LD schema presence, author byline + last-updated date for E-E-A-T). Read-only.', [
             'type' => 'object',
             'properties' => [
                 'post_id'       => ['type' => 'integer'],
@@ -41,17 +43,19 @@ final class Claudpress_Tools_SEO
             'required' => ['post_id'],
         ], [self::class, 'seo_analyze'], ['readOnlyHint' => true]);
 
-        $r->add('seo_schema', 'Attach JSON-LD structured data to a post (or the whole site). Provide a schema type (Article, Product, FAQPage, LocalBusiness, Organization, BreadcrumbList, HowTo, Review…) and properties; Claudpress injects valid JSON-LD into the page <head>. Actions: set, get, delete.', [
+        $r->add('seo_schema', 'Attach JSON-LD structured data to a post (or the whole site). Two ways to call it: (1) pass a full "schema" object/array yourself — pass an array of objects to layer several types on one page (rendered as @graph); or (2) pass "generate" (one of: article, faq, howto, local_business, person) plus "data" and Claudpress builds valid schema.org JSON-LD for you, including the Article author as a Person from the post author\'s WordPress profile — the schema type AI answer engines rely on most for E-E-A-T attribution. Actions: set, get, delete.', [
             'type' => 'object',
             'properties' => [
                 'action'     => ['type' => 'string', 'enum' => ['set', 'get', 'delete'], 'default' => 'set'],
                 'post_id'    => ['type' => 'integer', 'description' => 'Omit for site-wide schema.'],
-                'schema'     => ['type' => 'object', 'description' => 'A JSON-LD object, or the properties (Claudpress adds @context).'],
+                'schema'     => ['type' => 'object', 'description' => 'A JSON-LD object, or an array of objects to layer as @graph (Claudpress adds @context).'],
+                'generate'   => ['type' => 'string', 'enum' => ['article', 'faq', 'howto', 'local_business', 'person'], 'description' => 'Have Claudpress build the JSON-LD instead of writing it by hand.'],
+                'data'       => ['type' => 'object', 'description' => 'Fields for the chosen "generate" type, e.g. faq: {"items":[{"question":"...","answer":"..."}]}; local_business: {"name","address","phone","hours"}; howto: {"steps":["...","..."]}.'],
             ],
             'required' => ['action'],
         ], [self::class, 'seo_schema'], ['destructiveHint' => true]);
 
-        $r->add('seo_redirect', 'Manage 301/302 redirects. Uses the Redirection or Rank Math redirect module when present, otherwise a built-in Claudpress redirect table that runs on template_redirect. Actions: add, list, delete.', [
+        $r->add('seo_redirect', 'Manage 301/302 redirects via a built-in Claudpress redirect table that runs on template_redirect (independent of any redirect plugin the site may also have active). Actions: add, list, delete.', [
             'type' => 'object',
             'properties' => [
                 'action' => ['type' => 'string', 'enum' => ['add', 'list', 'delete'], 'default' => 'list'],
@@ -63,11 +67,12 @@ final class Claudpress_Tools_SEO
             'required' => ['action'],
         ], [self::class, 'seo_redirect'], ['destructiveHint' => true]);
 
-        $r->add('seo_sitemap', 'Get the XML sitemap URL and ping search engines, or read/write robots.txt directives. Actions: get_sitemap, ping, get_robots, set_robots.', [
+        $r->add('seo_sitemap', 'Get the XML sitemap URL and ping Bing (Google retired sitemap ping in 2023), read/write robots.txt directives, manage the site\'s /llms.txt (the AI-facing "about this site" file that ChatGPT/Perplexity/Claude etc. read to understand what a site is and how to cite it), and control which named AI crawlers (GPTBot, ClaudeBot, Google-Extended, PerplexityBot, CCBot, Bytespider, Applebot-Extended) are allowed to fetch the site. Actions: get_sitemap, ping, get_robots, set_robots, get_llms_txt, set_llms_txt, get_ai_crawlers, set_ai_crawlers.', [
             'type' => 'object',
             'properties' => [
-                'action'  => ['type' => 'string', 'enum' => ['get_sitemap', 'ping', 'get_robots', 'set_robots'], 'default' => 'get_sitemap'],
-                'content' => ['type' => 'string', 'description' => 'For set_robots: extra robots.txt rules to store.'],
+                'action'  => ['type' => 'string', 'enum' => ['get_sitemap', 'ping', 'get_robots', 'set_robots', 'get_llms_txt', 'set_llms_txt', 'get_ai_crawlers', 'set_ai_crawlers'], 'default' => 'get_sitemap'],
+                'content' => ['type' => 'string', 'description' => 'For set_robots: extra robots.txt rules to store. For set_llms_txt: the full llms.txt body (markdown per the llmstxt.org spec — an H1 site name, a blockquote summary, then H2 sections with links).'],
+                'bots'    => ['type' => 'object', 'description' => 'For set_ai_crawlers: map of bot name -> true (allow) / false (disallow), e.g. {"GPTBot": true, "CCBot": false}. Unlisted bots keep their current setting.'],
             ],
             'required' => ['action'],
         ], [self::class, 'seo_sitemap'], ['destructiveHint' => true]);
@@ -231,7 +236,39 @@ final class Claudpress_Tools_SEO
         $checks[] = ['check' => 'Images missing alt', 'value' => $img_no_alt . '/' . $img_total, 'ok' => $img_no_alt === 0];
         $checks[] = ['check' => 'Has H1/H2 structure', 'value' => count($headings), 'ok' => count($headings) >= 1];
 
+        // ---- GEO / AI-answer-engine checks -------------------------------
+        $geo_checks = [];
+
+        $first_para_text = trim(mb_substr($body, 0, 320));
+        $answer_first = $first_para_text !== '' && $words > 0
+            && (mb_strlen($first_para_text) >= 40)
+            && !preg_match('/^(in this (post|article|guide)|welcome to|today,? we|have you ever)/i', $first_para_text);
+        $geo_checks[] = ['check' => 'Answer-first opening (states the answer, not a preamble)', 'ok' => $answer_first, 'note' => 'AI engines extract the first direct statement; avoid "In this article we will..." openings.'];
+
+        $has_faq = (bool) preg_match('/<h[2-4][^>]*>[^<]*\?[^<]*<\/h[2-4]>/i', $post->post_content);
+        $geo_checks[] = ['check' => 'FAQ-style Q&A headings present', 'ok' => $has_faq, 'note' => 'Question-phrased H2/H3 headings are what answer engines lift as direct citations.'];
+
+        $has_list_or_table = (bool) preg_match('/<(ul|ol|table)[\s>]/i', $post->post_content);
+        $geo_checks[] = ['check' => 'List/table structuring present', 'ok' => $has_list_or_table, 'note' => 'Lists and tables are the most extractable/citable content shape for LLM answer engines.'];
+
+        $schema = self::seo_schema(['action' => 'get', 'post_id' => $post->ID]);
+        $has_schema = !empty($schema['schema']);
+        $geo_checks[] = ['check' => 'JSON-LD schema attached', 'ok' => $has_schema, 'note' => 'Use seo_schema to attach Article/FAQPage/HowTo/Product schema — AI engines weight structured data heavily for attribution.'];
+
+        $author = get_userdata((int) $post->post_author);
+        $has_bio = $author && trim((string) $author->description) !== '';
+        $geo_checks[] = ['check' => 'Author byline has a bio (E-E-A-T)', 'ok' => (bool) $has_bio, 'note' => 'Named author + credentials is a trust signal both Google and AI engines use to decide who to cite/recommend.'];
+
+        $modified = strtotime($post->post_modified_gmt);
+        $fresh = $modified && (time() - $modified) < (180 * DAY_IN_SECONDS);
+        $geo_checks[] = ['check' => 'Updated within last 6 months', 'value' => $post->post_modified, 'ok' => (bool) $fresh, 'note' => 'Stale content is deprioritized by AI answer engines in favor of recently-verified sources.'];
+
+        $geo_checks[] = ['check' => 'Has outbound citation(s)', 'value' => $external, 'ok' => $external >= 1, 'note' => 'Linking to authoritative external sources signals the page is a well-sourced primary reference, not a rehash.'];
+
+        $checks = array_merge($checks, $geo_checks);
+
         $passed = count(array_filter($checks, fn($c) => ($c['ok'] ?? false)));
+        $geo_passed = count(array_filter($geo_checks, fn($c) => ($c['ok'] ?? false)));
         return [
             'success'      => true,
             'post_id'      => $post->ID,
@@ -243,6 +280,7 @@ final class Claudpress_Tools_SEO
             'links'        => ['internal' => $internal, 'external' => $external],
             'images'       => ['total' => $img_total, 'missing_alt' => $img_no_alt],
             'score'        => round($passed / max(1, count($checks)) * 100),
+            'geo_score'    => round($geo_passed / max(1, count($geo_checks)) * 100),
             'checks'       => $checks,
         ];
     }
@@ -263,8 +301,23 @@ final class Claudpress_Tools_SEO
             $val = $post_id ? get_post_meta($post_id, $key, true) : get_option('claudpress_site_schema');
             return ['success' => true, 'schema' => $val ?: null];
         }
-        $schema = $args['schema'] ?? [];
-        if (is_array($schema) && empty($schema['@context'])) {
+
+        if (!empty($args['generate'])) {
+            $schema = self::generate_schema((string) $args['generate'], (array) ($args['data'] ?? []), $post_id);
+        } else {
+            $schema = $args['schema'] ?? [];
+        }
+
+        // Multiple schema objects on one page -> combine as @graph.
+        $is_list = is_array($schema) && array_keys($schema) === range(0, count($schema) - 1);
+        if ($is_list && $schema) {
+            foreach ($schema as $i => $node) {
+                if (is_array($node) && empty($node['@context'])) {
+                    unset($schema[$i]['@context']);
+                }
+            }
+            $schema = ['@context' => 'https://schema.org', '@graph' => array_values($schema)];
+        } elseif (is_array($schema) && empty($schema['@context'])) {
             $schema = array_merge(['@context' => 'https://schema.org'], $schema);
         }
         $json = wp_json_encode($schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
@@ -274,6 +327,83 @@ final class Claudpress_Tools_SEO
             update_option('claudpress_site_schema', $json);
         }
         return ['success' => true, 'schema' => $schema, 'note' => 'Injected into the page <head> as JSON-LD.'];
+    }
+
+    /** Build common schema.org JSON-LD types from post data so the calling agent doesn't hand-write it. */
+    private static function generate_schema(string $type, array $data, int $post_id): array
+    {
+        $post = $post_id ? get_post($post_id) : null;
+
+        switch ($type) {
+            case 'article':
+                $author = $post ? get_userdata((int) $post->post_author) : null;
+                $node = [
+                    '@type' => 'Article',
+                    'headline' => $data['headline'] ?? ($post ? get_the_title($post) : ''),
+                    'datePublished' => $post ? mysql2date('c', $post->post_date_gmt, false) : '',
+                    'dateModified' => $post ? mysql2date('c', $post->post_modified_gmt, false) : '',
+                ];
+                if ($author) {
+                    $node['author'] = array_filter([
+                        '@type' => 'Person',
+                        'name' => $author->display_name,
+                        'description' => $author->description ?: null,
+                        'url' => get_author_posts_url($author->ID) ?: null,
+                    ], fn($v) => $v !== null && $v !== '');
+                }
+                if (!empty($data['image'])) {
+                    $node['image'] = $data['image'];
+                }
+                return array_filter($node, fn($v) => $v !== null && $v !== '');
+
+            case 'faq':
+                $items = [];
+                foreach ((array) ($data['items'] ?? []) as $item) {
+                    if (empty($item['question']) || empty($item['answer'])) {
+                        continue;
+                    }
+                    $items[] = [
+                        '@type' => 'Question',
+                        'name' => $item['question'],
+                        'acceptedAnswer' => ['@type' => 'Answer', 'text' => $item['answer']],
+                    ];
+                }
+                return ['@type' => 'FAQPage', 'mainEntity' => $items];
+
+            case 'howto':
+                $steps = [];
+                foreach ((array) ($data['steps'] ?? []) as $i => $step) {
+                    $steps[] = ['@type' => 'HowToStep', 'position' => $i + 1, 'text' => is_array($step) ? ($step['text'] ?? '') : $step];
+                }
+                return array_filter([
+                    '@type' => 'HowTo',
+                    'name' => $data['name'] ?? ($post ? get_the_title($post) : ''),
+                    'step' => $steps,
+                ]);
+
+            case 'local_business':
+                return array_filter([
+                    '@type' => $data['business_type'] ?? 'LocalBusiness',
+                    'name' => $data['name'] ?? get_bloginfo('name'),
+                    'address' => !empty($data['address']) ? ['@type' => 'PostalAddress'] + (array) $data['address'] : null,
+                    'telephone' => $data['phone'] ?? null,
+                    'openingHours' => $data['hours'] ?? null,
+                    'url' => home_url(),
+                ]);
+
+            case 'person':
+                return array_filter([
+                    '@type' => 'Person',
+                    'name' => $data['name'] ?? '',
+                    'jobTitle' => $data['job_title'] ?? null,
+                    'description' => $data['description'] ?? null,
+                    'url' => $data['url'] ?? null,
+                    'sameAs' => $data['same_as'] ?? null,
+                ]);
+
+            default:
+                return $data;
+        }
     }
 
     // ---- redirects --------------------------------------------------------
@@ -311,31 +441,72 @@ final class Claudpress_Tools_SEO
         switch ($action) {
             case 'ping':
                 $sitemap = self::sitemap_url();
-                $results = [];
-                foreach (["https://www.google.com/ping?sitemap=", "https://www.bing.com/ping?sitemap="] as $endpoint) {
-                    $resp = wp_remote_get($endpoint . rawurlencode($sitemap), ['timeout' => 10]);
-                    $results[] = ['endpoint' => $endpoint, 'code' => is_wp_error($resp) ? $resp->get_error_message() : wp_remote_retrieve_response_code($resp)];
-                }
-                return ['success' => true, 'sitemap' => $sitemap, 'pings' => $results];
+                // Google retired its sitemap-ping endpoint in June 2023; only Bing is pinged.
+                $resp = wp_remote_get('https://www.bing.com/ping?sitemap=' . rawurlencode($sitemap), ['timeout' => 10]);
+                return [
+                    'success' => true,
+                    'sitemap' => $sitemap,
+                    'pings' => [['endpoint' => 'https://www.bing.com/ping?sitemap=', 'code' => is_wp_error($resp) ? $resp->get_error_message() : wp_remote_retrieve_response_code($resp)]],
+                    'note' => 'Google no longer supports sitemap ping; submit/verify the sitemap in Search Console instead.',
+                ];
             case 'get_robots':
-                return ['success' => true, 'robots' => apply_filters('robots_txt', '', true), 'extra' => get_option('claudpress_robots_extra', '')];
+                return ['success' => true, 'robots' => apply_filters('robots_txt', '', true), 'extra' => get_option('claudpress_robots_extra', ''), 'ai_crawlers' => self::ai_crawler_settings()];
             case 'set_robots':
                 update_option('claudpress_robots_extra', (string) ($args['content'] ?? ''));
                 return ['success' => true, 'note' => 'Extra robots.txt rules stored and appended to the virtual robots.txt.'];
+            case 'get_llms_txt':
+                return ['success' => true, 'llms_txt' => get_option('claudpress_llms_txt', ''), 'url' => home_url('/llms.txt')];
+            case 'set_llms_txt':
+                update_option('claudpress_llms_txt', (string) ($args['content'] ?? ''));
+                return ['success' => true, 'url' => home_url('/llms.txt'), 'note' => 'Served at /llms.txt. Follow the llmstxt.org format: H1 name, one-line blockquote summary, then H2 link sections — this is what AI answer engines read to understand and cite the site.'];
+            case 'get_ai_crawlers':
+                return ['success' => true, 'bots' => self::ai_crawler_settings()];
+            case 'set_ai_crawlers':
+                $current = self::ai_crawler_settings();
+                foreach ((array) ($args['bots'] ?? []) as $bot => $allow) {
+                    if (isset($current[$bot])) {
+                        $current[$bot] = (bool) $allow;
+                    }
+                }
+                update_option('claudpress_ai_crawlers', $current);
+                return ['success' => true, 'bots' => $current];
             case 'get_sitemap':
             default:
                 return ['success' => true, 'sitemap' => self::sitemap_url()];
         }
     }
 
+    /** Known AI-crawler user-agents and their allow/disallow state (default: allow — visible to AI search). */
+    private static function ai_crawler_settings(): array
+    {
+        $defaults = [
+            'GPTBot'            => true, // OpenAI / ChatGPT browsing & training
+            'ChatGPT-User'      => true, // OpenAI / ChatGPT live browsing
+            'ClaudeBot'         => true, // Anthropic / Claude
+            'Claude-User'       => true, // Anthropic / Claude live browsing
+            'Google-Extended'   => true, // Google AI Overviews / Gemini training
+            'PerplexityBot'     => true, // Perplexity
+            'Applebot-Extended' => true, // Apple Intelligence
+            'CCBot'             => true, // Common Crawl (feeds many LLMs)
+            'Bytespider'        => true, // ByteDance / TikTok LLMs
+        ];
+        $stored = get_option('claudpress_ai_crawlers', []);
+        return is_array($stored) ? array_merge($defaults, array_intersect_key($stored, $defaults)) : $defaults;
+    }
+
     private static function sitemap_url(): string
     {
         $active = (array) get_option('active_plugins', []);
-        if (in_array('wordpress-seo/wp-seo.php', $active, true)) {
-            return home_url('/sitemap_index.xml');
-        }
-        if (in_array('seo-by-rank-math/rank-math.php', $active, true)) {
-            return home_url('/sitemap_index.xml');
+        $known  = [
+            'wordpress-seo/wp-seo.php' => '/sitemap_index.xml',
+            'seo-by-rank-math/rank-math.php' => '/sitemap_index.xml',
+            'all-in-one-seo-pack/all_in_one_seo_pack.php' => '/sitemap.xml',
+            'wp-seopress/seopress.php' => '/sitemap_index.xml',
+        ];
+        foreach ($known as $file => $path) {
+            if (in_array($file, $active, true)) {
+                return home_url($path);
+            }
         }
         return home_url('/wp-sitemap.xml'); // WordPress core sitemap
     }
@@ -346,7 +517,24 @@ final class Claudpress_Tools_SEO
     {
         add_action('wp_head', [self::class, 'inject_head'], 1);
         add_action('template_redirect', [self::class, 'do_redirects'], 1);
+        add_action('template_redirect', [self::class, 'serve_llms_txt'], 0);
         add_filter('robots_txt', [self::class, 'filter_robots'], 20, 1);
+    }
+
+    /** Serves the stored llms.txt at /llms.txt, ahead of normal routing. */
+    public static function serve_llms_txt(): void
+    {
+        $path = trim((string) wp_parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH), '/');
+        if ($path !== 'llms.txt') {
+            return;
+        }
+        $content = get_option('claudpress_llms_txt', '');
+        if ($content === '') {
+            return; // let it 404 rather than serve an empty file
+        }
+        header('Content-Type: text/plain; charset=utf-8');
+        echo $content;
+        exit;
     }
 
     public static function inject_head(): void
@@ -418,6 +606,13 @@ final class Claudpress_Tools_SEO
 
     public static function filter_robots(string $output): string
     {
+        $disallowed = array_keys(array_filter(self::ai_crawler_settings(), fn($allowed) => !$allowed));
+        if ($disallowed) {
+            $output .= "\n";
+            foreach ($disallowed as $bot) {
+                $output .= "User-agent: {$bot}\nDisallow: /\n\n";
+            }
+        }
         $extra = get_option('claudpress_robots_extra', '');
         return $extra ? $output . "\n" . $extra . "\n" : $output;
     }

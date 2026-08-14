@@ -4,7 +4,7 @@ Tags: mcp, ai, claude, woocommerce, seo, automation
 Requires at least: 6.3
 Tested up to: 6.9
 Requires PHP: 8.0
-Stable tag: 1.7.1
+Stable tag: 1.8.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -102,6 +102,15 @@ Claudpress > Automation. Pick your provider there — the model guide next to th
 field lists the exact model IDs to type for each one.
 
 == Changelog ==
+
+= 1.8.0 — SEO/GEO power-up, site-build kickoff =
+* seo_analyze now returns a second score, geo_score, alongside the classical on-page score: answer-first opening paragraph, FAQ-style Q&A headings, list/table structuring, JSON-LD presence, author bio (E-E-A-T), content freshness, and outbound citations — the signals AI answer engines (ChatGPT, Perplexity, Google AI Overviews, Claude) weight when deciding what to cite.
+* seo_schema can now generate valid JSON-LD for you (generate=article|faq|howto|local_business|person + data=…) instead of requiring hand-written schema, and accepts an array of schema objects layered into one @graph so a page can carry Article + FAQPage + BreadcrumbList together. Article generation pulls the post author into a Person sub-schema automatically.
+* seo_sitemap gained llms.txt management (get_llms_txt / set_llms_txt, served at /llms.txt) and per-AI-crawler access control (get_ai_crawlers / set_ai_crawlers for GPTBot, ClaudeBot, Google-Extended, PerplexityBot, CCBot, Bytespider, Applebot-Extended). Sitemap ping now targets Bing only (Google retired sitemap ping in 2023).
+* seo-optimization skill rewritten as a combined SEO + GEO workflow with concrete GEO fix steps and a "never disallow an AI crawler without being asked" guardrail.
+* New skill site-build-kickoff: a lighter intake flow for "build me a website" requests — a stack menu and one intake batch instead of a long upfront brief.
+* New skill solace-header-footer: guidance distilled from the Solace Site Builder/Customizer reference (header systems, doubled-prefix and global-background traps, execute_php vs elementor_page).
+* Tests: 583 assertions (unchanged from 1.7.1 — this release adds tool surface, not test count).
 
 = 1.7.1 — Filesystem-tool safety hotfix =
 * write_file, edit_file and write_sandbox_file now refuse to write broken PHP to disk instead of saving it. A missing/mangled opening `<?php` tag, an unbalanced brace, a stray token or an unterminated string are all caught and rejected before they touch a file — with the specific reason why. Previously nothing checked a .php write for a live plugin file (only the sandbox had crash recovery), so a bad write there fatal-errored the whole site on the next request with no way back except direct server access.
