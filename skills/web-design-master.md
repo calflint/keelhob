@@ -16,6 +16,39 @@ You are a senior web designer, not a template filler. This is your reference for
 4. **Build** in the right mode (pixel-perfect `page_template` snippet, or editable Gutenberg/Elementor).
 5. **Audit** against the checklist in §8 and fix before declaring done.
 
+## 1b. Write the design package first, and get it approved
+
+Step 3 above produces a written artifact, not a vibe. Post it to the user and get an
+explicit yes **before** writing any markup. This is the last revision that costs
+minutes instead of hours, and it is the single biggest difference between a site that
+looks commissioned and one that looks generated.
+
+Ask for a **reference image** as part of this — a screenshot of a site the user admires
+(Awwwards, Dribbble, a competitor). One reference picture settles more design argument
+than a paragraph of adjectives. If they have a logo, pull the palette out of the logo
+rather than inventing one beside it.
+
+The package is six short parts:
+
+1. **Brand premise** — one paragraph naming what this business actually is. It must
+   contain at least one real word from the trade that an outsider would not use
+   (*ullage*, *tonewood*, *setting time*, *bleed*). That word sets the register for
+   every line of copy that follows.
+2. **Palette** — the token block from §2, but each colour named after a real material
+   from the brand's world: the grey of wet slate, dried ink, kiln brick. "Professional
+   navy" and "modern teal" are how generic sites get their colour.
+3. **Type trio** — display, body, and optionally mono. The display face must have a
+   point of view; **Inter and Roboto are body faces, never the display choice**. Body
+   must stay comfortable at 16–18px.
+4. **Section outline** — every section in order, each with its verbatim headline, its
+   key copy, and what the visitor is meant to do or feel there. A section that cannot
+   be given a real headline yet is a section that should not be built yet.
+5. **Copy gate line** — one sentence stating the promise this site makes. Afterwards,
+   every section must earn its place against that sentence. If a section does not serve
+   it, cut the section.
+6. **Mobile plan** — what the hero becomes on a phone. Decide it now, in words, rather
+   than discovering it at the end.
+
 ## 2. Design tokens (define once, reuse everywhere)
 Never scatter raw values. Define a token block and reference it. Put it in a `snippet_save` CSS snippet (location `header`) or the page template's `<style>`/`:root`.
 
@@ -82,6 +115,18 @@ Score each 0–4; fix anything below 3.
 
 ## 9. Avoid AI-slop signals
 Reject the defaults that scream "generated": everything centered, one purple-to-blue gradient on everything, emoji as the only icons, identical evenly-sized cards, meaningless hero stock, filler copy, and no visual hierarchy. Instead: a real type scale, intentional asymmetry, one confident accent, generous whitespace, and content that says something specific.
+
+Two checks you can actually run over the finished copy, not just judge by eye:
+
+- **Word blacklist.** Search the page for: *stunning, seamless, revolutionize,
+  game-changing, cutting-edge, innovative, transform, elevate, unlock, discover,
+  empower, leverage, journey, solutions*. Every hit is a sentence that says nothing —
+  rewrite it around a concrete fact. Search for the em dash (—) too; a page full of
+  them reads as machine-written, so use a comma, a full stop, or a spaced hyphen.
+- **No filler sections.** No "coming soon", no empty card grid waiting for content, no
+  blog module wired to nothing, no placeholder image. A section with nothing real in it
+  costs more trust than the section would have earned. Ship four honest sections rather
+  than nine hollow ones, and tell the user which ones are still waiting on their copy.
 
 ## 10. Persist the system
 Once a design direction is set, save it (`memory_save` keys like `brand.accent`, `brand.type`, `design.system`) and apply it site-wide (Elementor kit via `elementor_kit`, or a global CSS snippet) so every future page stays cohesive.

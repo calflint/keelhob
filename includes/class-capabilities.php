@@ -115,7 +115,7 @@ final class Claudpress_Capabilities
             'skills' => [
                 'label' => 'Skills (write)', 'sensitive' => false,
                 'desc' => 'Create/delete agent skills.',
-                'tools' => ['skill_save', 'skill_delete'],
+                'tools' => ['skill_save', 'skill_delete', 'skill_refresh'],
             ],
             'deploy' => [
                 'label' => 'Deploy to production', 'sensitive' => true,

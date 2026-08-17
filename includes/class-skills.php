@@ -35,6 +35,7 @@ final class Claudpress_Skills
             enable_prompt TINYINT(1) NOT NULL DEFAULT 1,
             enabled TINYINT(1) NOT NULL DEFAULT 1,
             is_bundled TINYINT(1) NOT NULL DEFAULT 0,
+            bundled_hash VARCHAR(32) NOT NULL DEFAULT '',
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             UNIQUE KEY name (name)
@@ -72,6 +73,9 @@ final class Claudpress_Skills
             'is_bundled'     => (int) (bool) ($args['is_bundled'] ?? 0),
             'updated_at'     => current_time('mysql'),
         ];
+        if (array_key_exists('bundled_hash', $args)) {
+            $row['bundled_hash'] = (string) $args['bundled_hash'];
+        }
 
         $exists = $this->get_by_name($name);
         if ($exists) {
@@ -173,12 +177,32 @@ final class Claudpress_Skills
      * specializations" idea, unlocked and free. Only seeds on activation and
      * only when a same-named skill does not already exist (so user edits win).
      */
-    public static function seed_bundled_skills(): void
+    /**
+     * Install the skills that ship with the plugin, and refresh the ones the
+     * owner has not touched.
+     *
+     * The original rule was "never overwrite an existing skill", which is right
+     * for a skill somebody edited and wrong for every other case: an improved
+     * playbook shipped in a plugin update would never reach a site that had
+     * been running since the previous release, so the bundled skills silently
+     * froze at whatever version was installed first.
+     *
+     * `bundled_hash` is what tells the two apart. It records the body Claudpress
+     * last wrote. If the stored body still hashes to it, nobody has edited the
+     * skill and it is safe to replace with the newer text. If it differs, the
+     * owner (or an agent) rewrote it, and their version is left alone.
+     *
+     * @param bool $force Replace bundled skills even when they look edited.
+     *                    Only ever set from an explicit owner-driven refresh.
+     * @return array{installed: string[], updated: string[], kept: string[]}
+     */
+    public static function seed_bundled_skills(bool $force = false): array
     {
-        $skills   = self::instance_free();
-        $dir      = CLAUDPRESS_DIR . 'skills';
+        $report = ['installed' => [], 'updated' => [], 'kept' => []];
+        $skills = self::instance_free();
+        $dir    = CLAUDPRESS_DIR . 'skills';
         if (!is_dir($dir)) {
-            return;
+            return $report;
         }
         foreach (glob($dir . '/*.md') as $file) {
             $doc    = file_get_contents($file);
@@ -187,13 +211,66 @@ final class Claudpress_Skills
             if ($name === '') {
                 continue;
             }
-            if ($skills->get_by_name($name)) {
-                continue; // never overwrite an existing (possibly user-edited) skill
+
+            $parsed['is_bundled']   = 1;
+            $parsed['name']         = $name;
+            $parsed['bundled_hash'] = md5((string) ($parsed['body'] ?? ''));
+
+            $existing = $skills->get_by_name($name);
+            switch (self::bundled_action($existing, $parsed['bundled_hash'], $force)) {
+                case 'install':
+                    $skills->save($parsed);
+                    $report['installed'][] = $name;
+                    break;
+
+                case 'update':
+                    // Preserve the owner's on/off choices; only the text changes.
+                    $parsed['enabled']        = (int) $existing['enabled'];
+                    $parsed['enable_agentic'] = (int) $existing['enable_agentic'];
+                    $parsed['enable_prompt']  = (int) $existing['enable_prompt'];
+                    $skills->save($parsed);
+                    $report['updated'][] = $name;
+                    break;
+
+                case 'keep':
+                    // Stamp the hash from the body that is on the site right now,
+                    // so the *next* update can tell edited from untouched and this
+                    // one-time ambiguity does not repeat forever.
+                    if ((string) ($existing['bundled_hash'] ?? '') === '') {
+                        $GLOBALS['wpdb']->update(
+                            self::table(),
+                            ['bundled_hash' => md5((string) $existing['body'])],
+                            ['name' => $name]
+                        );
+                    }
+                    $report['kept'][] = $name;
+                    break;
+
+                // 'current' — already the shipped text, nothing to do.
             }
-            $parsed['is_bundled'] = 1;
-            $parsed['name']       = $name;
-            $skills->save($parsed);
         }
+        return $report;
+    }
+
+    /**
+     * Decide what to do with one bundled skill. Pure, so the rules are testable.
+     *
+     * @param array<string, mixed>|null $existing     the stored row, if any
+     * @param string                    $shipped_hash md5 of the body being shipped
+     * @return string install | update | keep | current
+     */
+    public static function bundled_action(?array $existing, string $shipped_hash, bool $force = false): string
+    {
+        if (!$existing) {
+            return 'install';
+        }
+        $stored_hash = (string) ($existing['bundled_hash'] ?? '');
+        $untouched   = $stored_hash !== '' && $stored_hash === md5((string) ($existing['body'] ?? ''));
+
+        if (!$untouched) {
+            return $force ? 'update' : 'keep';
+        }
+        return $stored_hash === $shipped_hash ? 'current' : 'update';
     }
 
     /** Static helper so activation (no booted singleton) can use the store. */

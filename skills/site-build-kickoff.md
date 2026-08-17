@@ -33,7 +33,16 @@ Ask everything needed to build without guessing:
 - **Design system** — do they have brand colors/fonts/logo already, or should the agent propose one? If proposing, follow `web-design-master`.
 - **Content sources** — where should images/videos come from: their own files (ask them to attach/upload), `image_search` (free stock), `image_generate` (if a key is set), or a reference site/screenshot to match.
 - **Reference design** — any site or screenshot to match the style of? If yes, that changes the build to a clone workflow (see Step 3).
+- **Hero treatment** — a normal image hero, or a cinematic hero video that scrubs with
+  the scroll? Only offer the second when the product is visual and the user has (or can
+  make) footage; it changes the build to Mode 3 in `website-building`, and the video and
+  its ffmpeg re-encode have to happen outside WordPress.
 - **Domain/credentials** — only if going live now; otherwise skip.
+
+Ask for the real assets in this same batch — logo, product photos, hero footage, any
+existing copy — and wait for them before building. Building against placeholders and
+swapping later doubles the work, because the design ends up shaped around the wrong
+picture. If an asset never arrives, say which one is missing and what you used instead.
 
 Don't ask about things covered by the stack choice already (builder, header/footer tool). Don't ask more than this batch — extra questions can wait until they come up mid-build.
 
@@ -49,6 +58,17 @@ Don't ask about things covered by the stack choice already (builder, header/foot
 6. `seo-optimization` pass across every new page once content is final.
 7. Clear Elementor cache once, at the end, not per-page.
 8. Report the live URL(s) and what's left (e.g. blog deferred, images to swap).
+
+## Step 5 — revision loop (how to hand it over)
+
+Do not present the site section by section and ask "is this right?" after each one. Ask
+the user to do **one full pass on a real phone and a real desktop**, collect every note,
+and send them together. Then work the whole batch, verify, and hand it back. One batched
+round beats fifteen single-note rounds: it costs less of their attention, and notes that
+contradict each other surface while they are still cheap to reconcile.
+
+Before that first pass, run the `pre-launch-audit` skill yourself. Finding your own
+broken link is free; the user finding it costs trust.
 
 ## Delegating to sub-agents
 If the environment supports spawning sub-agents (e.g. an `Agent`/Task tool is available), don't build every page yourself serially:
