@@ -77,9 +77,33 @@ $cp->memory = new CP_Test_Bag([
     ['key' => 'brand.accent', 'category' => 'design', 'value' => '#f8ca50', 'updated_at' => '2026-08-08 09:00:00'],
 ]);
 
+// The Snippets page reads rows from the database, which the bootstrap does not
+// have. Feed it fixtures instead, so the row + detail markup is exercised for
+// real — an empty table would render but prove nothing about either.
+Claudpress_Admin_Snippets::$source = static function (array $filters): array {
+    return [
+        [
+            'id' => 12, 'uid' => 'cps_abc123', 'name' => 'Sticky header', 'description' => 'Keeps the header pinned while scrolling.',
+            'tags' => ',header,design,', 'purpose' => 'The client asked for a persistent nav.', 'impact' => 'Header stays on screen on every page.',
+            'code' => "if (true) { echo '<b>ok</b>'; }", 'snippet_type' => 'php', 'location' => 'everywhere', 'target_id' => 0,
+            'priority' => 10, 'active' => 1, 'last_error' => null, 'origin_site' => '', 'origin_uid' => '',
+            'created_at' => '2026-08-01 10:00:00', 'updated_at' => '2026-08-02 11:00:00',
+        ],
+        [
+            // A crashed copy from another site, with no notes — the legacy path.
+            'id' => 3, 'uid' => 'cps_def456', 'name' => 'Promo banner', 'description' => '',
+            'tags' => '', 'purpose' => '', 'impact' => '',
+            'code' => '.promo { color: red; }', 'snippet_type' => 'css', 'location' => 'header', 'target_id' => 0,
+            'priority' => 10, 'active' => 0, 'last_error' => 'Call to undefined function foo()', 'origin_site' => 'Pranknologia', 'origin_uid' => 'cps_src999',
+            'created_at' => null, 'updated_at' => '2026-08-03 09:00:00',
+        ],
+    ];
+};
+
 $admin = new Claudpress_Admin();
 $pages = [
     'render'            => 'Connect',
+    'render_snippets'   => 'Snippets',
     'render_automation' => 'Automation',
     'render_guide'      => 'Guide',
     'render_activity'   => 'Activity',
@@ -132,6 +156,30 @@ foreach ($pages as $method => $label) {
     CP_Test::ok(strpos($out, '<?php') === false, $label . ' leaks no raw PHP');
     CP_Test::ok(strpos($out, '<?=') === false, $label . ' leaks no short-echo tags');
 }
+
+CP_Test::group('Admin — the Snippets page shows what the AI installed');
+
+$snips = $html['Snippets'] ?? '';
+foreach ([
+    'Sticky header'                       => 'the snippet name',
+    'The client asked for a persistent nav.' => 'the purpose the agent recorded',
+    'Header stays on screen on every page.'  => 'the impact the agent recorded',
+    'cps_abc123'                          => 'the portable uid',
+    'Pranknologia'                        => 'the site a snippet was copied from',
+    'Call to undefined function foo()'    => 'the error that switched a snippet off',
+    'Auto-disabled'                       => 'the auto-disabled status',
+    'value="snippet_toggle"'              => 'the per-row toggle control',
+    'value="snippet_update"'              => 'the edit form',
+    'value="snippet_delete"'              => 'the delete control',
+] as $needle => $what) {
+    CP_Test::contains($needle, $snips, 'Snippets page shows ' . $what);
+}
+
+// Legacy rows have no notes; the page must say so rather than render blank.
+CP_Test::contains('Legacy snippet', $snips, 'Snippets page explains a snippet with no recorded notes');
+
+// The code must reach the textarea intact — a sanitiser here would corrupt it.
+CP_Test::contains('&lt;b&gt;ok&lt;/b&gt;', $snips, 'snippet code is HTML-escaped for display, not stripped');
 
 CP_Test::group('Admin — every form is nonce-protected');
 

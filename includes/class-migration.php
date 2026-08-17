@@ -17,7 +17,10 @@ if (!defined('ABSPATH')) {
 
 final class Claudpress_Migration
 {
-    const BUNDLE_VERSION = 2;
+    // 3 = snippets carry uid/tags/purpose/impact, so re-importing upserts.
+    // v2 bundles still import: no uid simply means every snippet inserts,
+    // which is exactly what v2 did.
+    const BUNDLE_VERSION = 3;
 
     /** Every entity type a bundle can carry. */
     const TYPES = ['pages', 'posts', 'products', 'snippets', 'skills', 'memory', 'options', 'menus', 'widgets'];
@@ -244,6 +247,18 @@ final class Claudpress_Migration
             }
         }
         foreach (($e['snippets'] ?? []) as $s) {
+            // The exported uid is kept as the identity AND recorded as the
+            // origin, which is what makes the import idempotent in both
+            // directions: re-importing onto the source site matches the
+            // original row by uid, and onto a destination site it matches the
+            // copy made by the previous import. Without this, every import
+            // inserted a fresh row and the "idempotent upsert" claim was false.
+            if (!empty($s['uid'])) {
+                $s['origin_uid'] = $s['uid'];
+            }
+            if (!empty($bundle['source'])) {
+                $s['origin_site'] = (string) $bundle['source'];
+            }
             Claudpress_Snippets::save($s);
             $report['updated'][] = 'snippet:' . ($s['name'] ?? '');
         }

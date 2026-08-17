@@ -43,7 +43,7 @@ final class Claudpress_Tools_Core
 
         $r->add(
             'get_site_info',
-            'Return an overview of this WordPress site: WP/PHP versions, site URL, active theme, active plugins, whether WooCommerce/known SEO plugins are present, counts of posts/pages/products, and the Claudpress abilities state. Safe, read-only — works even when abilities are disabled.',
+            'Return an overview of this WordPress site: WP/PHP versions, site URL, active theme, active plugins, whether WooCommerce/known SEO plugins are present, counts of posts/pages/products, the Claudpress abilities state, and this site\'s short site_label (the handle to use when the owner names this site among several, e.g. when copying a snippet to another site). Safe, read-only — works even when abilities are disabled.',
             ['type' => 'object', 'properties' => (object) []],
             [self::class, 'get_site_info'],
             ['readOnlyHint' => true, 'title' => 'Get Site Info']
@@ -139,6 +139,9 @@ final class Claudpress_Tools_Core
             'site_url'     => site_url(),
             'home_url'     => home_url(),
             'name'         => get_bloginfo('name'),
+            // The handle to use when the owner names this site among several
+            // ("copy the sticky-header snippet from Pranknologia to DesertDrift").
+            'site_label'   => Claudpress::site_label(),
             'description'  => get_bloginfo('description'),
             'wp_version'   => $wp_version,
             'php_version'  => PHP_VERSION,

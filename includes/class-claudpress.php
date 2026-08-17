@@ -39,6 +39,25 @@ final class Claudpress
     }
 
     /**
+     * The name an agent uses for this site when it is connected to several.
+     *
+     * Resolved at read time, never frozen into the option: if the owner renames
+     * the site, the handle follows. Falls back site name → host.
+     */
+    public static function site_label(): string
+    {
+        $set = trim((string) self::instance()->get('site_label', ''));
+        if ($set !== '') {
+            return $set;
+        }
+        $name = trim((string) get_bloginfo('name'));
+        if ($name !== '') {
+            return $name;
+        }
+        return (string) wp_parse_url(home_url(), PHP_URL_HOST);
+    }
+
+    /**
      * Default settings. `abilities_enabled` is the master safety switch — when
      * false, the MCP endpoint authenticates but exposes no destructive tools.
      */
@@ -54,6 +73,10 @@ final class Claudpress
             'log_calls'         => true,
             // Snippet engine kill-switch (active snippets run for real visitors).
             'run_snippets'      => true,
+            // Short handle an agent uses to tell this site apart from the other
+            // sites it is connected to ("copy that snippet from Pranknologia").
+            // Blank = derive it from the site name at read time — see site_label().
+            'site_label'        => '',
             // Which page builder the site uses; loads matching guidance/skill.
             'builder'           => 'auto', // auto | gutenberg | elementor_free | elementor_pro | bricks | custom_php
             // Optional AI image generation. Blank key = use free image_search.
@@ -207,6 +230,9 @@ final class Claudpress
         Claudpress_Agent_Runs::install_table();
         Claudpress_Telegram::install_table();
         Claudpress_Logger::install_table();
+        // After install_table() has added the columns: give pre-1.9 snippets a
+        // uid and a created_at so the Snippets page and cross-site copy work.
+        Claudpress_Snippets::backfill();
         Claudpress_Skills::seed_bundled_skills();
         self::seed_default_memory();
         if (!file_exists(CLAUDPRESS_SANDBOX_DIR)) {
@@ -243,6 +269,7 @@ final class Claudpress
         Claudpress_Agent_Runs::install_table();
         Claudpress_Telegram::install_table();
         Claudpress_Logger::install_table();
+        Claudpress_Snippets::backfill();
         Claudpress_Skills::seed_bundled_skills();
         self::seed_default_memory();
         update_option('claudpress_db_version', CLAUDPRESS_VERSION);

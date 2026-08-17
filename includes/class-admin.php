@@ -23,6 +23,9 @@ final class Claudpress_Admin
     {
         add_menu_page('Claudpress', 'Claudpress', 'manage_options', 'claudpress', [$this, 'render'], 'dashicons-superhero', 58);
         add_submenu_page('claudpress', __('Connect', 'claudpress'), __('Connect', 'claudpress'), 'manage_options', 'claudpress', [$this, 'render']);
+        // Directly after Connect: this is the primary "what has the AI done to
+        // my site" surface, and it must be easy to find in a hurry.
+        add_submenu_page('claudpress', __('Snippets', 'claudpress'), __('Snippets', 'claudpress'), 'manage_options', 'claudpress-snippets', [$this, 'render_snippets']);
         add_submenu_page('claudpress', __('Automation', 'claudpress'), __('Automation', 'claudpress'), 'manage_options', 'claudpress-automation', [$this, 'render_automation']);
         add_submenu_page('claudpress', __('Guide', 'claudpress'), __('Guide', 'claudpress'), 'manage_options', 'claudpress-guide', [$this, 'render_guide']);
         add_submenu_page('claudpress', __('Activity', 'claudpress'), __('Activity', 'claudpress'), 'manage_options', 'claudpress-activity', [$this, 'render_activity']);
@@ -122,6 +125,45 @@ final class Claudpress_Admin
         return ($submitted === '' || untrailingslashit($submitted) === untrailingslashit($default)) ? '' : $submitted;
     }
 
+    /** Every admin screen this plugin owns. Also the redirect whitelist. */
+    private static function page_slugs(): array
+    {
+        return ['claudpress', 'claudpress-snippets', 'claudpress-automation', 'claudpress-guide', 'claudpress-activity'];
+    }
+
+    /**
+     * Send the user back to the page they submitted from, preserving its
+     * filters.
+     *
+     * The slug is whitelisted rather than trusted: it arrives in the POST body,
+     * and a free-text redirect target is an open-redirect vector.
+     */
+    private static function redirect_back(): void
+    {
+        $page = sanitize_key($_POST['claudpress_redirect_page'] ?? '');
+        if (!in_array($page, self::page_slugs(), true)) {
+            $page = 'claudpress';
+        }
+        $args = ['page' => $page, 'saved' => 1];
+
+        $filters = json_decode((string) wp_unslash($_POST['claudpress_filters'] ?? ''), true);
+        if (is_array($filters)) {
+            foreach (['search' => 's', 'tag' => 'tag', 'snippet_type' => 'type', 'active' => 'active'] as $key => $arg) {
+                $value = isset($filters[$key]) ? sanitize_text_field((string) $filters[$key]) : '';
+                if ($value !== '') {
+                    $args[$arg] = $value;
+                }
+            }
+        }
+        wp_safe_redirect(add_query_arg($args, admin_url('admin.php')));
+        exit;
+    }
+
+    public function render_snippets(): void
+    {
+        (new Claudpress_Admin_Snippets())->render();
+    }
+
     public function handle_save(): void
     {
         if (!current_user_can('manage_options') || !check_admin_referer('claudpress_save')) {
@@ -139,6 +181,7 @@ final class Claudpress_Admin
                 'log_calls'           => !empty($_POST['log_calls']),
                 'fs_base'             => !empty($_POST['fs_base']) ? sanitize_text_field(wp_unslash($_POST['fs_base'])) : ABSPATH,
                 'run_snippets'        => !empty($_POST['run_snippets']),
+                'site_label'          => sanitize_text_field(wp_unslash($_POST['site_label'] ?? '')),
                 'builder'             => sanitize_key($_POST['builder'] ?? 'auto'),
                 'image_provider'      => sanitize_key($_POST['image_provider'] ?? 'openai'),
                 'image_api_key'       => sanitize_text_field(wp_unslash($_POST['image_api_key'] ?? '')),
@@ -267,6 +310,25 @@ final class Claudpress_Admin
             $n = Claudpress_Telegram::clear_all();
             wp_safe_redirect(add_query_arg(['page' => 'claudpress-automation', 'tg' => 'cleared', 'tg_n' => $n], admin_url('admin.php')) . '#chat');
             exit;
+        } elseif ($action === 'snippet_toggle') {
+            Claudpress_Snippets::toggle((int) ($_POST['snippet_id'] ?? 0), (string) ($_POST['snippet_active'] ?? '0') === '1');
+            self::redirect_back();
+        } elseif ($action === 'snippet_update') {
+            Claudpress_Snippets::save([
+                'id'   => (int) ($_POST['snippet_id'] ?? 0),
+                'name' => sanitize_text_field(wp_unslash($_POST['snippet_name'] ?? '')),
+                'tags' => sanitize_text_field(wp_unslash($_POST['snippet_tags'] ?? '')),
+                // Deliberately raw: any sanitiser corrupts valid PHP/JS/CSS
+                // (&& → &amp;&amp;, angle brackets stripped) and would hand the
+                // owner a broken snippet with no error. Authorisation is the
+                // manage_options + nonce check above; correctness is the parse
+                // check inside save() and the runtime crash guard.
+                'code' => wp_unslash($_POST['code'] ?? ''),
+            ]);
+            self::redirect_back();
+        } elseif ($action === 'snippet_delete') {
+            Claudpress_Snippets::delete((int) ($_POST['snippet_id'] ?? 0));
+            self::redirect_back();
         } elseif ($action === 'test_notify') {
             Claudpress_Notifier::send('[' . get_bloginfo('name') . '] Claudpress test', 'This is a test notification from Claudpress. Channels are working.');
             wp_safe_redirect(add_query_arg(['page' => 'claudpress-automation', 'tested' => 1], admin_url('admin.php')));
@@ -283,7 +345,10 @@ final class Claudpress_Admin
         $endpoint = rest_url(CLAUDPRESS_REST_NAMESPACE . '/mcp');
         $token    = (string) $s['token'];
         $host     = wp_parse_url(home_url(), PHP_URL_HOST);
-        $server_name = 'claudpress-' . sanitize_title($host ?: 'site');
+        // The MCP server name is the string the agent sees for this site, so it
+        // should be the same handle the owner uses — that is what makes
+        // "copy that snippet to the other shop" resolve to the right server.
+        $server_name = 'claudpress-' . sanitize_title(Claudpress::site_label() ?: ($host ?: 'site'));
 
         $claude_code_cmd = sprintf(
             "claude mcp add %s --transport http %s --header \"Authorization: Bearer %s\"",
@@ -343,6 +408,11 @@ final class Claudpress_Admin
                             <p>
                                 <label><?php esc_html_e('Filesystem base directory (tools are confined at/below this path):', 'claudpress'); ?><br>
                                 <input type="text" name="fs_base" value="<?php echo esc_attr($s['fs_base']); ?>" class="regular-text" style="width:100%;max-width:520px;"></label>
+                            </p>
+                            <p>
+                                <label><?php esc_html_e('Site label (what your agent calls this site):', 'claudpress'); ?><br>
+                                <input type="text" name="site_label" value="<?php echo esc_attr((string) ($s['site_label'] ?? '')); ?>" placeholder="<?php echo esc_attr(Claudpress::site_label()); ?>" class="regular-text" style="width:100%;max-width:520px;"></label>
+                                <br><span style="color:#787c82;"><?php esc_html_e('Leave blank to use the site name. Matters when one agent is connected to several sites — this is the handle you say out loud, as in "copy that snippet to the other shop".', 'claudpress'); ?></span>
                             </p>
                             <hr>
                             <p><label><input type="checkbox" name="run_snippets" value="1" <?php checked(!empty($s['run_snippets'])); ?>> <strong><?php esc_html_e('Run code snippets', 'claudpress'); ?></strong> <?php esc_html_e('(active PHP/CSS/JS/HTML snippets execute on the site; uncheck to kill all at once)', 'claudpress'); ?></label></p>
@@ -1138,6 +1208,17 @@ final class Claudpress_Admin
 
             <h2 style="<?php echo esc_attr($h); ?>"><?php esc_html_e('What is Claudpress?', 'claudpress'); ?></h2>
             <p><?php esc_html_e('Claudpress turns your WordPress site into something an AI assistant (Claude, ChatGPT/Codex, Gemini, Cursor…) can operate directly. Instead of you clicking around the dashboard, you chat with your AI — "add this product", "write a blog post", "how are sales?" — and it does the work on your site through a set of tools this plugin provides. It speaks a standard called MCP (Model Context Protocol), so it works with most AI apps, not just one.', 'claudpress'); ?></p>
+
+            <h2 style="<?php echo esc_attr($h); ?>"><?php esc_html_e('Seeing what the AI installed', 'claudpress'); ?></h2>
+            <p>
+                <?php
+                printf(
+                    /* translators: %s: link to the Snippets page */
+                    esc_html__('When your AI writes code onto this site, every piece of it is listed on the %s page — what it is, why it was written, what it changes, and a switch to turn it off. That page is the first place to look if the site starts behaving oddly.', 'claudpress'),
+                    '<a href="' . esc_url(admin_url('admin.php?page=claudpress-snippets')) . '">' . esc_html__('Snippets', 'claudpress') . '</a>'
+                );
+                ?>
+            </p>
 
             <h2 style="<?php echo esc_attr($h); ?>"><?php esc_html_e('Get started in 3 steps', 'claudpress'); ?></h2>
             <ol style="font-size:14px;line-height:1.9;max-width:800px;">

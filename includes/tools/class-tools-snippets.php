@@ -12,7 +12,7 @@ final class Claudpress_Tools_Snippets
 {
     public static function register(Claudpress_Tool_Registry $r): void
     {
-        $r->add('snippet_save', 'Create or update a code snippet that runs on the site — like WPCode/Code Snippets. Types: php (runs in WordPress; NO <?php tags; use add_action/add_filter/functions), css, js, html. Location controls where it runs: everywhere, admin_only, frontend_only, header (wp_head), footer (wp_footer), before_content, after_content, shortcode (use [claudpress_snippet id=N]), or page_template (serve raw PHP/HTML as a whole page for target_id — the pixel-perfect custom-coded page mode). A PHP snippet that fatals is auto-deactivated so the site stays up. Set active=true to turn it on.', [
+        $r->add('snippet_save', 'Create or update a code snippet that runs on the site — like WPCode/Code Snippets. Types: php (runs in WordPress; NO <?php tags; use add_action/add_filter/functions), css, js, html. Location controls where it runs: everywhere, admin_only, frontend_only, header (wp_head), footer (wp_footer), before_content, after_content, shortcode (use [claudpress_snippet id=N]), or page_template (serve raw PHP/HTML as a whole page for target_id — the pixel-perfect custom-coded page mode). ALWAYS fill name, tags, purpose and impact: the site owner reads them on the Claudpress > Snippets admin page and that is their only way to judge what you installed. Updates MERGE — send only the fields you are changing and everything else, including code, is preserved. PHP is parse-checked first; code that does not parse is still saved but forced inactive with the error attached. A PHP snippet that fatals at runtime is auto-deactivated so the site stays up. Set active=true to turn it on.', [
             'type' => 'object',
             'properties' => [
                 'id'           => ['type' => 'integer', 'description' => 'Omit to create; include to update.'],
@@ -25,12 +25,24 @@ final class Claudpress_Tools_Snippets
                 'priority'     => ['type' => 'integer', 'default' => 10],
                 'active'       => ['type' => 'boolean', 'default' => false],
                 'conditions'   => ['type' => 'object', 'description' => 'Optional load rules: {logged_in:bool, front_page:bool, post_types:[..], post_ids:[..]}.'],
+                'tags'         => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Short lowercase labels the owner filters by, e.g. ["seo","header"]. Max 10.'],
+                'purpose'      => ['type' => 'string', 'description' => 'Why this snippet exists, in plain English for the site owner.'],
+                'impact'       => ['type' => 'string', 'description' => 'What it changes on the site, and what breaks if it is switched off.'],
+                'uid'          => ['type' => 'string', 'description' => 'Portable identity. Omit on new snippets — one is generated.'],
+                'origin_site'  => ['type' => 'string', 'description' => 'When copying from another site: that site\'s label.'],
+                'origin_uid'   => ['type' => 'string', 'description' => 'When copying from another site: the source snippet\'s uid. Re-copying with the same origin_uid UPDATES the existing copy instead of duplicating it — which also overwrites any edit the owner made here.'],
             ],
             'required' => ['code'],
         ], [self::class, 'save'], ['destructiveHint' => true, 'title' => 'Save Code Snippet']);
 
-        $r->add('snippet_list', 'List all code snippets with their type, location, active state, and any last error. Read-only.', [
-            'type' => 'object', 'properties' => (object) [],
+        $r->add('snippet_list', 'List code snippets with their tags, purpose, impact, type, location, active state, portable uid, origin and any last error. Also returns this site\'s label, which is the handle to use when copying snippets between sites. Read-only.', [
+            'type' => 'object',
+            'properties' => [
+                'search'       => ['type' => 'string', 'description' => 'Match against name, description and purpose.'],
+                'tag'          => ['type' => 'string', 'description' => 'Exact tag match.'],
+                'snippet_type' => ['type' => 'string', 'enum' => ['php', 'css', 'js', 'html']],
+                'active'       => ['type' => 'boolean'],
+            ],
         ], [self::class, 'list'], ['readOnlyHint' => true]);
 
         $r->add('snippet_get', 'Get one snippet by ID, including its full code.', [
@@ -70,7 +82,25 @@ final class Claudpress_Tools_Snippets
 
     public static function list(array $a): array
     {
-        return ['success' => true, 'snippets' => Claudpress_Snippets::all()];
+        $filters = [
+            'search'       => (string) ($a['search'] ?? ''),
+            'tag'          => (string) ($a['tag'] ?? ''),
+            'snippet_type' => (string) ($a['snippet_type'] ?? ''),
+            'active'       => array_key_exists('active', $a) ? (string) (int) (bool) $a['active'] : '',
+        ];
+        // '0' is a real filter (show inactive), so test for '' — not falsiness.
+        $filtered = false;
+        foreach ($filters as $v) {
+            $filtered = $filtered || $v !== '';
+        }
+        $rows = $filtered ? Claudpress_Snippets::query($filters) : Claudpress_Snippets::all();
+        foreach ($rows as &$row) {
+            unset($row['code']);
+            $row['tags'] = Claudpress_Snippets::tags_array($row['tags'] ?? '');
+        }
+        unset($row);
+
+        return ['success' => true, 'site' => Claudpress::site_label(), 'snippets' => $rows];
     }
 
     public static function get(array $a): array

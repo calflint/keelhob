@@ -51,11 +51,134 @@ final class Claudpress_Snippets
             active TINYINT(1) NOT NULL DEFAULT 0,
             conditions_json LONGTEXT NULL,
             last_error TEXT NULL,
+            uid VARCHAR(40) NOT NULL DEFAULT '',
+            tags VARCHAR(191) NOT NULL DEFAULT '',
+            purpose TEXT NULL,
+            impact TEXT NULL,
+            origin_site VARCHAR(191) NOT NULL DEFAULT '',
+            origin_uid VARCHAR(40) NOT NULL DEFAULT '',
+            created_at DATETIME NULL,
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             KEY location (location),
-            KEY active (active)
+            KEY active (active),
+            KEY uid (uid),
+            KEY origin_uid (origin_uid)
         ) {$charset};");
+    }
+
+    /**
+     * Give every legacy row a portable identity. Idempotent — safe to call on
+     * every upgrade and activation.
+     *
+     * `uid` is deliberately a plain KEY, never UNIQUE: before this runs every
+     * pre-1.9 row holds the same '' default, and a UNIQUE index would simply
+     * fail to build, leaving the column silently unindexed.
+     */
+    public static function backfill(): void
+    {
+        global $wpdb;
+        $table = self::table();
+
+        $ids = $wpdb->get_col("SELECT id FROM {$table} WHERE uid = '' OR uid IS NULL");
+        foreach (($ids ?: []) as $id) {
+            $wpdb->update($table, ['uid' => self::new_uid()], ['id' => (int) $id]);
+        }
+        $wpdb->query("UPDATE {$table} SET created_at = updated_at WHERE created_at IS NULL");
+    }
+
+    /** Portable, site-independent identity for a snippet. */
+    public static function new_uid(): string
+    {
+        return 'cps_' . bin2hex(random_bytes(8));
+    }
+
+    /**
+     * Normalize tags to a sentinel-wrapped comma string (",seo,perf,").
+     *
+     * The sentinels are what make filtering exact: LIKE '%,seo,%' matches the
+     * tag `seo` and not `seo-audit`. Empty input stays '' (no lone sentinel).
+     *
+     * @param array<int, string>|string|null $in
+     */
+    public static function normalize_tags($in): string
+    {
+        if (is_string($in)) {
+            $in = explode(',', $in);
+        }
+        if (!is_array($in)) {
+            return '';
+        }
+        $out = [];
+        foreach ($in as $tag) {
+            $tag = substr(strtolower(trim(preg_replace('/[^A-Za-z0-9 _-]/', '', (string) $tag))), 0, 32);
+            $tag = trim(preg_replace('/[\s_]+/', '-', $tag), '-');
+            if ($tag !== '' && !in_array($tag, $out, true)) {
+                $out[] = $tag;
+            }
+            if (count($out) >= 10) {
+                break;
+            }
+        }
+        return $out ? ',' . implode(',', $out) . ',' : '';
+    }
+
+    /** @return array<int, string> */
+    public static function tags_array(?string $stored): array
+    {
+        $stored = trim((string) $stored, ',');
+        return $stored === '' ? [] : explode(',', $stored);
+    }
+
+    /**
+     * Pre-flight parse check for a snippet body.
+     *
+     * Uses token_get_all(..., TOKEN_PARSE) rather than shell_exec('php -l'),
+     * matching Claudpress_Tools_Filesystem — many hosts disable shell functions
+     * outright. Snippet PHP carries no opening tag, so one is prefixed; a
+     * page_template body is raw markup with <?php islands and lints as-is.
+     *
+     * @return string '' when the code parses, otherwise the parse error message
+     */
+    public static function lint_php(string $code, string $type = 'php', string $location = 'everywhere'): string
+    {
+        if ($type !== 'php' || trim($code) === '') {
+            return '';
+        }
+        $source = $location === 'page_template' ? $code : "<?php " . $code;
+        try {
+            token_get_all($source, TOKEN_PARSE);
+        } catch (\ParseError $e) {
+            return $e->getMessage();
+        }
+        return '';
+    }
+
+    /**
+     * Decide which existing row a save() payload refers to, if any.
+     *
+     * Split out from save() with the lookup injected so the precedence rules —
+     * the thing that makes a re-copy update instead of duplicate — are testable
+     * without a database.
+     *
+     * @param callable(string,string):?int $finder  (column, value) => row id|null
+     */
+    public static function resolve_target(array $a, callable $finder): ?int
+    {
+        $id = (int) ($a['id'] ?? 0);
+        if ($id && $finder('id', (string) $id)) {
+            return $id;
+        }
+        foreach (['uid', 'origin_uid'] as $col) {
+            $val = trim((string) ($a[$col] ?? ''));
+            if ($val !== '') {
+                $found = $finder($col, $val);
+                if ($found) {
+                    return (int) $found;
+                }
+            }
+        }
+        return null;
     }
 
     // ---- registration -----------------------------------------------------
@@ -316,6 +439,14 @@ final class Claudpress_Snippets
 
     // ---- CRUD -------------------------------------------------------------
 
+    /**
+     * Create or merge-update a snippet.
+     *
+     * Merge, not replace: an update starts from the stored row and overwrites
+     * only the keys actually present in $a. The old behaviour rebuilt the whole
+     * row, so `snippet_save({id, tags})` silently blanked `code` — the exact
+     * regression the admin page (which saves a subset of fields) would trip on.
+     */
     public static function save(array $a): array
     {
         global $wpdb;
@@ -323,31 +454,117 @@ final class Claudpress_Snippets
         $types     = ['php', 'css', 'js', 'html'];
         $locations = ['everywhere', 'admin_only', 'frontend_only', 'header', 'footer', 'before_content', 'after_content', 'shortcode', 'page_template'];
 
-        $type     = in_array($a['snippet_type'] ?? 'php', $types, true) ? $a['snippet_type'] : 'php';
-        $location = in_array($a['location'] ?? 'everywhere', $locations, true) ? $a['location'] : 'everywhere';
+        $id       = self::resolve_target($a, [self::class, 'find_id']);
+        $existing = $id ? self::get($id) : null;
+        if (!$existing) {
+            $id = null;
+        }
+
+        $type = array_key_exists('snippet_type', $a)
+            ? (in_array($a['snippet_type'], $types, true) ? $a['snippet_type'] : 'php')
+            : (string) ($existing['snippet_type'] ?? 'php');
+        $location = array_key_exists('location', $a)
+            ? (in_array($a['location'], $locations, true) ? $a['location'] : 'everywhere')
+            : (string) ($existing['location'] ?? 'everywhere');
 
         $row = [
-            'name'            => sanitize_text_field((string) ($a['name'] ?? 'Untitled snippet')),
-            'description'     => (string) ($a['description'] ?? ''),
-            'code'            => (string) ($a['code'] ?? ''),
-            'snippet_type'    => $type,
-            'location'        => $location,
-            'target_id'       => (int) ($a['target_id'] ?? 0),
-            'priority'        => (int) ($a['priority'] ?? 10),
-            'active'          => array_key_exists('active', $a) ? (int) (bool) $a['active'] : 0,
-            'conditions_json' => !empty($a['conditions']) ? wp_json_encode($a['conditions']) : null,
-            'last_error'      => null,
-            'updated_at'      => current_time('mysql'),
+            'name'         => array_key_exists('name', $a) ? sanitize_text_field((string) $a['name']) : (string) ($existing['name'] ?? 'Untitled snippet'),
+            'description'  => array_key_exists('description', $a) ? (string) $a['description'] : (string) ($existing['description'] ?? ''),
+            'code'         => array_key_exists('code', $a) ? (string) $a['code'] : (string) ($existing['code'] ?? ''),
+            'snippet_type' => $type,
+            'location'     => $location,
+            'target_id'    => array_key_exists('target_id', $a) ? (int) $a['target_id'] : (int) ($existing['target_id'] ?? 0),
+            'priority'     => array_key_exists('priority', $a) ? (int) $a['priority'] : (int) ($existing['priority'] ?? 10),
+            'active'       => array_key_exists('active', $a) ? (int) (bool) $a['active'] : (int) ($existing['active'] ?? 0),
+            'tags'         => array_key_exists('tags', $a) ? self::normalize_tags($a['tags']) : (string) ($existing['tags'] ?? ''),
+            'purpose'      => array_key_exists('purpose', $a) ? (string) $a['purpose'] : ($existing['purpose'] ?? null),
+            'impact'       => array_key_exists('impact', $a) ? (string) $a['impact'] : ($existing['impact'] ?? null),
+            'origin_site'  => array_key_exists('origin_site', $a) ? sanitize_text_field((string) $a['origin_site']) : (string) ($existing['origin_site'] ?? ''),
+            'origin_uid'   => array_key_exists('origin_uid', $a) ? sanitize_text_field((string) $a['origin_uid']) : (string) ($existing['origin_uid'] ?? ''),
+            'updated_at'   => current_time('mysql'),
         ];
 
-        $id = (int) ($a['id'] ?? 0);
-        if ($id && self::get($id)) {
+        $code_changed = $existing ? ($row['code'] !== (string) $existing['code']) : true;
+
+        // Fail soft, like the crash guard: broken code is still stored so the
+        // owner does not lose their work, but it is forced off and labelled.
+        $lint = self::lint_php($row['code'], $type, $location);
+        if ($lint !== '') {
+            $row['active']     = 0;
+            $row['last_error'] = 'Syntax error: ' . mb_substr($lint, 0, 900);
+        } elseif ($code_changed || $row['active'] === 1) {
+            // Only a real code change or a deliberate re-activation clears the
+            // auto-deactivation record; a metadata-only edit must not erase it.
+            $row['last_error'] = null;
+        }
+
+        if ($id) {
             $wpdb->update(self::table(), $row, ['id' => $id]);
         } else {
+            $row['uid']        = trim((string) ($a['uid'] ?? '')) !== '' ? sanitize_text_field((string) $a['uid']) : self::new_uid();
+            $row['created_at'] = current_time('mysql');
             $wpdb->insert(self::table(), $row);
             $id = (int) $wpdb->insert_id;
         }
-        return ['success' => true, 'id' => $id, 'active' => (bool) $row['active'], 'type' => $type, 'location' => $location];
+
+        $res = ['success' => true, 'id' => $id, 'active' => (bool) $row['active'], 'type' => $type, 'location' => $location];
+        if ($lint !== '') {
+            $res['lint_error'] = $lint;
+            $res['note']       = 'Saved but forced inactive: the PHP does not parse.';
+        }
+        return $res;
+    }
+
+    /** Row-id lookup by a single column. The seam resolve_target() is given. */
+    private static function find_id(string $column, string $value): ?int
+    {
+        global $wpdb;
+        if (!in_array($column, ['id', 'uid', 'origin_uid'], true)) {
+            return null;
+        }
+        $found = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM " . self::table() . " WHERE {$column} = %s LIMIT 1",
+            $value
+        ));
+        return $found ? (int) $found : null;
+    }
+
+    /**
+     * Filtered list for the admin page.
+     *
+     * @param array{search?:string, tag?:string, snippet_type?:string, active?:string} $filters
+     */
+    public static function query(array $filters = []): array
+    {
+        global $wpdb;
+        $where = ['1=1'];
+        $args  = [];
+
+        $search = trim((string) ($filters['search'] ?? ''));
+        if ($search !== '') {
+            $like    = '%' . $wpdb->esc_like($search) . '%';
+            $where[] = '(name LIKE %s OR description LIKE %s OR purpose LIKE %s)';
+            array_push($args, $like, $like, $like);
+        }
+        $tag = trim((string) ($filters['tag'] ?? ''));
+        if ($tag !== '') {
+            $where[] = 'tags LIKE %s';
+            $args[]  = '%,' . $wpdb->esc_like($tag) . ',%';
+        }
+        $type = (string) ($filters['snippet_type'] ?? '');
+        if (in_array($type, ['php', 'css', 'js', 'html'], true)) {
+            $where[] = 'snippet_type = %s';
+            $args[]  = $type;
+        }
+        $active = (string) ($filters['active'] ?? '');
+        if ($active === '1' || $active === '0') {
+            $where[] = 'active = %d';
+            $args[]  = (int) $active;
+        }
+
+        $sql = "SELECT * FROM " . self::table() . " WHERE " . implode(' AND ', $where) . " ORDER BY id DESC";
+        $rows = $args ? $wpdb->get_results($wpdb->prepare($sql, ...$args), ARRAY_A) : $wpdb->get_results($sql, ARRAY_A);
+        return $rows ?: [];
     }
 
     public static function get(int $id): ?array
@@ -360,7 +577,7 @@ final class Claudpress_Snippets
     public static function all(): array
     {
         global $wpdb;
-        $rows = $wpdb->get_results("SELECT id, name, description, snippet_type, location, target_id, priority, active, last_error, updated_at FROM " . self::table() . " ORDER BY id DESC", ARRAY_A);
+        $rows = $wpdb->get_results("SELECT id, uid, name, description, tags, purpose, impact, snippet_type, location, target_id, priority, active, last_error, origin_site, origin_uid, created_at, updated_at FROM " . self::table() . " ORDER BY id DESC", ARRAY_A);
         return $rows ?: [];
     }
 
@@ -368,7 +585,7 @@ final class Claudpress_Snippets
     public static function all_full(): array
     {
         global $wpdb;
-        $rows = $wpdb->get_results("SELECT name, description, code, snippet_type, location, target_id, priority, active, conditions_json FROM " . self::table() . " ORDER BY id ASC", ARRAY_A);
+        $rows = $wpdb->get_results("SELECT uid, name, description, code, snippet_type, location, target_id, priority, active, tags, purpose, impact, conditions_json FROM " . self::table() . " ORDER BY id ASC", ARRAY_A);
         // Decode conditions back to an array so save() re-encodes cleanly on import.
         foreach ($rows as &$r) {
             if (!empty($r['conditions_json'])) {

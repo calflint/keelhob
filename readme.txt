@@ -4,7 +4,7 @@ Tags: mcp, ai, claude, woocommerce, seo, automation
 Requires at least: 6.3
 Tested up to: 6.9
 Requires PHP: 8.0
-Stable tag: 1.8.0
+Stable tag: 1.9.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -102,6 +102,15 @@ Claudpress > Automation. Pick your provider there — the model guide next to th
 field lists the exact model IDs to type for each one.
 
 == Changelog ==
+
+= 1.9.0 — Snippets control page =
+* New Claudpress > Snippets admin page: every snippet the AI has installed, listed with Name | Description | Tags | Type | Status | ID, per-row activate/deactivate, and an expandable panel explaining why the snippet exists, what it changes, where and when it runs, where it came from, and any error that switched it off. Code can be edited and snippets deleted from the browser.
+* snippet_save now MERGES on update. Previously it rebuilt the whole row, so saving one field (for example adding tags) silently wiped the snippet's code.
+* snippet_save gained tags, purpose, impact, uid, origin_site and origin_uid; snippet_list gained search/tag/snippet_type/active filters and returns the new fields plus the site label.
+* PHP snippets are parse-checked before they are stored. Code that does not parse is still saved — you do not lose your work — but is forced inactive with the error attached, instead of fataling the site and relying on the crash guard.
+* Cross-site copying: every snippet now has a portable uid, and each site has a short site_label (settable on the Connect page, exposed by get_site_info). Ask your agent to copy a snippet from one connected site to another; re-copying updates the existing copy instead of duplicating it.
+* Bundle export/import is now idempotent for snippets — importing the same bundle twice no longer duplicates every snippet. Bundle version 2 → 3; version 2 bundles still import.
+* Tests: 638 assertions.
 
 = 1.8.0 — SEO/GEO power-up, site-build kickoff =
 * seo_analyze now returns a second score, geo_score, alongside the classical on-page score: answer-first opening paragraph, FAQ-style Q&A headings, list/table structuring, JSON-LD presence, author bio (E-E-A-T), content freshness, and outbound citations — the signals AI answer engines (ChatGPT, Perplexity, Google AI Overviews, Claude) weight when deciding what to cite.

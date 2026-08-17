@@ -245,6 +245,16 @@ class CP_Test_WPDB
         return null;
     }
 
+    public function get_col($query, $column = 0)
+    {
+        return [];
+    }
+
+    public function esc_like($text)
+    {
+        return addcslashes((string) $text, '_%\\');
+    }
+
     public function query($query)
     {
         return 0;
@@ -285,6 +295,7 @@ function wp_timezone_string() { return 'UTC'; }
 function wp_next_scheduled($hook) { return time() + 3600; }
 function human_time_diff($from, $to = 0) { return '1 hour'; }
 function get_current_screen() { return null; }
+function get_permalink($id = 0) { return 'https://example.test/?p=' . (int) $id; }
 function set_transient($key, $value, $ttl = 0) { return true; }
 function get_transient($key) { return false; }
 
@@ -314,3 +325,4 @@ require_once CLAUDPRESS_DIR . 'includes/class-tasks.php';
 require_once CLAUDPRESS_DIR . 'includes/class-migration.php';
 require_once CLAUDPRESS_DIR . 'includes/class-snippets.php';
 require_once CLAUDPRESS_DIR . 'includes/class-admin.php';
+require_once CLAUDPRESS_DIR . 'includes/class-admin-snippets.php';

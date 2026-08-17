@@ -217,6 +217,7 @@ includes/
   class-undo.php            one-step undo of a turn's content changes
   class-migration.php       portable bundles (products, menus, widgets)
   class-admin.php           connect / automation / guide / activity UI
+  class-admin-snippets.php  the Snippets page: what the AI installed, and its off switch
   tools/                    core, filesystem, content, site, woocommerce, seo, memory, skills,
                             snippets, elementor, ops, automation, payments, deploy
 skills/                     bundled expert skill playbooks (markdown)
