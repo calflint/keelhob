@@ -62,6 +62,16 @@ foreach ($always as $tool) {
 }
 KH_Test::same([], $phantom_always, 'no always-on entry references a tool that no longer exists');
 
+KH_Test::group('Integrity — the agent install guide lists the default-off capability groups');
+
+$guide = (string) file_get_contents($root . '/llms-install.md');
+preg_match('/^## Capabilities are off by default, on purpose\R[ \t]*\R(.*?)(?=\R[ \t]*\R|\z)/ms', $guide, $section);
+KH_Test::ok(isset($section[1]), 'llms-install.md has a paragraph listing the default-off capability groups');
+preg_match_all('/`([a-z][a-z0-9_]*)`/', $section[1] ?? '', $documented);
+$default_off = Keelhob_Capabilities::DISABLED_BY_DEFAULT;
+KH_Test::same([], array_values(array_diff($default_off, $documented[1])), 'every default-off group is listed in llms-install.md');
+KH_Test::same([], array_values(array_diff($documented[1], $default_off)), 'llms-install.md lists only default-off groups');
+
 KH_Test::group('Integrity — sensitive tools are marked sensitive');
 
 // Anything that can spend money, run code, or touch the filesystem must live in
