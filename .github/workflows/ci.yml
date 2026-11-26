@@ -23,6 +23,21 @@ on:
   pull_request:
   workflow_dispatch:
 
+# What the CI token may do, stated here rather than inherited.
+#
+# The repository default is already read-only, so this changes nothing today.
+# It is written down because a repository SETTING is invisible from the code:
+# anyone who flips that default to read/write silently hands eight jobs the
+# ability to push to this repository, and those jobs run code from strangers'
+# pull requests. A line in the file cannot be widened by a click in a menu.
+#
+# contents: read is enough for every job here. The two GITHUB_TOKEN uses are
+# setup-php resolving pinned tools through the API, and upload-artifact uses
+# the Actions runtime token rather than this one. Nothing publishes, comments
+# or pushes.
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint (PHP ${{ matrix.php }})
