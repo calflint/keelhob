@@ -91,6 +91,8 @@ or write a skill. Skills are plain markdown; no PHP needed.
 2. WordPress admin → **Plugins → Add New → Upload Plugin** → the zip → **Install Now** → **Activate**.
 3. Open **Keelhob** in the admin menu.
 
+Setting this up with a coding agent? Point it at [llms-install.md](llms-install.md).
+
 Requires WordPress 6.3+ and PHP 8.0+. WooCommerce and any SEO plugin (Yoast, Rank Math, AIOSEO,
 SEOPress) are auto-detected if present; none are required. **Keelhob → Connect** then prints a
 ready-to-paste command with your real URL and token in it:
